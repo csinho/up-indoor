@@ -6,6 +6,7 @@ import type { Ad } from "@/lib/types";
 import { extractYouTubeId } from "./index";
 
 export const Route = createFileRoute("/player/$screenId")({
+  ssr: false,
   component: PlayerPage,
 });
 

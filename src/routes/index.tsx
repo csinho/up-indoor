@@ -69,6 +69,7 @@ import type { Ad, MediaType, Screen } from "@/lib/types";
 import { supabaseEnabled } from "@/lib/supabase";
 
 export const Route = createFileRoute("/")({
+  ssr: false,
   component: Dashboard,
 });
 
