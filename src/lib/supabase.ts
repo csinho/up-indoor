@@ -19,7 +19,7 @@ export const functionsUrl =
  */
 export async function callEdgeFunction<T = unknown>(
   name: string,
-  body?: unknown,
+  body?: Record<string, unknown>,
 ): Promise<T> {
   if (!supabase) throw new Error("Supabase não configurado (.env)");
   const { data, error } = await supabase.functions.invoke<T>(name, { body });
