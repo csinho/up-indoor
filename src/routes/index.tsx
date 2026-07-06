@@ -478,9 +478,9 @@ function getDisplayModeLabel(mode: ScreenDisplayMode | undefined) {
 function getDisplayModeTransform(mode: ScreenDisplayMode | undefined) {
   switch (mode) {
     case "rotate_90":
-      return "rotate(90deg) scale(1.78)";
+      return "rotate(90deg)";
     case "rotate_270":
-      return "rotate(-90deg) scale(1.78)";
+      return "rotate(-90deg)";
     case "fill":
       return "scale(1.05)";
     case "normal":
@@ -525,7 +525,7 @@ function ScreenDisplayPreview({
 }) {
   const isRotated = displayMode === "rotate_90" || displayMode === "rotate_270";
   const isPortraitAsset = orientation === "portrait";
-  const innerWidth = isRotated ? "56%" : isPortraitAsset ? "44%" : "74%";
+  const innerWidth = isRotated ? "56.25%" : isPortraitAsset ? "44%" : "74%";
   const innerHeight = isRotated ? "100%" : isPortraitAsset ? "76%" : "42%";
 
   return (

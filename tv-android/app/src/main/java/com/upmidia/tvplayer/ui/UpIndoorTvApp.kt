@@ -50,7 +50,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -65,7 +69,6 @@ import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
-import com.upmidia.tvplayer.MainActivity
 import com.upmidia.tvplayer.data.BackendConfig
 import com.upmidia.tvplayer.data.DeviceSessionStore
 import com.upmidia.tvplayer.data.TvBackendException
@@ -426,18 +429,6 @@ private fun PlayerScreen(
   manifest: TvScreenManifest,
   onResetPairing: () -> Unit,
 ) {
-  val activity = LocalContext.current as? MainActivity
-
-  DisposableEffect(activity, manifest.orientation) {
-    activity?.applyPlayerOrientation(
-      isPortrait = manifest.orientation == TvOrientation.PORTRAIT,
-    )
-
-    onDispose {
-      Unit
-    }
-  }
-
   Box(
     modifier = Modifier.fillMaxSize().background(Color.Black),
   ) {
@@ -466,6 +457,10 @@ private fun PlayerScreen(
         text = if (manifest.orientation == TvOrientation.LANDSCAPE) "Horizontal" else "Vertical",
         color = Color(0xFF22D3EE),
       )
+      Text(
+        text = getDisplayModeLabel(manifest.displayMode),
+        color = Color(0xFF94A3B8),
+      )
     }
 
     Button(
@@ -479,19 +474,55 @@ private fun PlayerScreen(
 
 @Composable
 private fun TvViewport(manifest: TvScreenManifest) {
-  TvLayoutCanvas(
-    manifest = manifest,
-    modifier = Modifier.fillMaxSize(),
-  )
+  val layout =
+    remember(manifest.orientation, manifest.displayMode) {
+      resolveTvContentLayout(manifest)
+    }
+
+  if (!layout.usePortraitCanvas || layout.rotationDegrees == 0f) {
+    TvLayoutCanvas(
+      manifest = manifest,
+      shouldCropMedia = layout.shouldCropMedia,
+      modifier = Modifier.fillMaxSize(),
+    )
+    return
+  }
+
+  Box(
+    modifier =
+      Modifier
+        .fillMaxSize()
+        .background(Color.Black),
+    contentAlignment = Alignment.Center,
+  ) {
+    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+      Box(
+        modifier =
+          Modifier
+            .width(maxHeight)
+            .height(maxWidth)
+            .graphicsLayer {
+              rotationZ = layout.rotationDegrees
+              transformOrigin = TransformOrigin(0.5f, 0.5f)
+              clip = true
+            },
+      ) {
+        TvLayoutCanvas(
+          manifest = manifest,
+          shouldCropMedia = false,
+          modifier = Modifier.fillMaxSize(),
+        )
+      }
+    }
+  }
 }
 
 @Composable
 private fun TvLayoutCanvas(
   manifest: TvScreenManifest,
+  shouldCropMedia: Boolean,
   modifier: Modifier = Modifier,
 ) {
-  val shouldCropMedia = shouldCropMedia(manifest.displayMode)
-
   BoxWithConstraints(modifier = modifier) {
     val canvasWidth = manifest.canvasWidth.toFloat()
     val canvasHeight = manifest.canvasHeight.toFloat()
@@ -508,7 +539,8 @@ private fun TvLayoutCanvas(
             .absoluteOffset(x = left, y = top)
             .width(width)
             .height(height)
-            .background(parseColorOrFallback(region.backgroundHex), RoundedCornerShape(18.dp)),
+            .clip(RectangleShape)
+            .background(Color.Black),
       ) {
         RegionLayer(
           region = region,
@@ -640,7 +672,7 @@ private fun MediaPlaceholderView(item: TvRegionItem) {
 @Composable
 private fun ImageRegionView(
   item: TvRegionItem,
-  shouldCropMedia: Boolean = false,
+  shouldCropMedia: Boolean,
 ) {
   val imageResult by produceState(
     initialValue = ImageLoadResult(bitmap = null),
@@ -676,7 +708,7 @@ private fun ImageRegionView(
 @Composable
 private fun VideoRegionView(
   item: TvRegionItem,
-  shouldCropMedia: Boolean = false,
+  shouldCropMedia: Boolean,
 ) {
   val context = LocalContext.current
   var playbackError by remember(item.id, item.source) { mutableStateOf<String?>(null) }
@@ -739,42 +771,34 @@ private fun VideoRegionView(
     }
   }
 
-  Box(
-    modifier =
-      Modifier
-        .fillMaxSize()
-        .background(Color.Black),
-  ) {
-    AndroidView(
-      factory = { viewContext ->
-        TextureView(viewContext).apply {
-          isOpaque = true
+  AndroidView(
+    factory = { viewContext ->
+      TextureView(viewContext).apply {
+        isOpaque = true
+      }
+    },
+    modifier = Modifier.fillMaxSize(),
+    update = { textureView ->
+      exoPlayer.videoScalingMode =
+        if (shouldCropMedia) {
+          C.VIDEO_SCALING_MODE_SCALE_TO_FIT_WITH_CROPPING
+        } else {
+          C.VIDEO_SCALING_MODE_SCALE_TO_FIT
         }
-      },
-      modifier = Modifier.fillMaxSize(),
-      update = { textureView ->
-        exoPlayer.videoScalingMode =
-          if (shouldCropMedia) {
-            C.VIDEO_SCALING_MODE_SCALE_TO_FIT_WITH_CROPPING
-          } else {
-            C.VIDEO_SCALING_MODE_SCALE_TO_FIT
-          }
-        exoPlayer.setVideoTextureView(textureView)
-      },
-      onRelease = { textureView ->
-        exoPlayer.clearVideoTextureView(textureView)
-      },
-    )
-  }
+      exoPlayer.setVideoTextureView(textureView)
+    },
+    onRelease = { textureView ->
+      exoPlayer.clearVideoTextureView(textureView)
+    },
+  )
 }
 
-private fun shouldCropMedia(displayMode: TvDisplayMode): Boolean {
+private fun getDisplayModeLabel(displayMode: TvDisplayMode): String {
   return when (displayMode) {
-    TvDisplayMode.FILL,
-    TvDisplayMode.ROTATE_90,
-    TvDisplayMode.ROTATE_270,
-    -> true
-    TvDisplayMode.NORMAL -> false
+    TvDisplayMode.ROTATE_90 -> "Vertical 90"
+    TvDisplayMode.ROTATE_270 -> "Vertical 270"
+    TvDisplayMode.FILL -> "Tela cheia"
+    TvDisplayMode.NORMAL -> "Normal"
   }
 }
 

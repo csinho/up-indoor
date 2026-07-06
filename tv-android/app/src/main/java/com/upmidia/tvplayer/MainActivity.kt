@@ -1,7 +1,7 @@
 package com.upmidia.tvplayer
 
-import android.os.Bundle
 import android.content.pm.ActivityInfo
+import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.core.view.WindowCompat
@@ -15,12 +15,11 @@ import kotlinx.coroutines.launch
 class MainActivity : ComponentActivity() {
   private val sessionStore by lazy { DeviceSessionStore(this) }
   private val repository by lazy { TvManifestRepository() }
-  private var appliedOrientation: Int? = null
 
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
+    // Android TV: saida HDMI e sempre landscape; rotacao de conteudo portrait fica no Compose.
     requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
-    appliedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
     WindowCompat.setDecorFitsSystemWindows(window, false)
 
     setContent {
@@ -52,15 +51,6 @@ class MainActivity : ComponentActivity() {
           meta = org.json.JSONObject().put("lifecycleEvent", lifecycleEvent),
         )
       }
-    }
-  }
-
-  fun applyPlayerOrientation(isPortrait: Boolean) {
-    val target = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
-
-    if (appliedOrientation != target || requestedOrientation != target) {
-      appliedOrientation = target
-      requestedOrientation = target
     }
   }
 }

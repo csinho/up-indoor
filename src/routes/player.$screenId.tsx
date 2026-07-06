@@ -106,14 +106,29 @@ function DisplayViewport({
   ad: Ad;
   isSingleAd: boolean;
 }) {
-  const fillScreen =
-    displayMode === "fill" ||
-    displayMode === "rotate_90" ||
-    displayMode === "rotate_270";
+  if (displayMode === "rotate_90" || displayMode === "rotate_270") {
+    const rotation = displayMode === "rotate_90" ? "90deg" : "-90deg";
+    return (
+      <div className="relative h-full w-full overflow-hidden bg-black">
+        <div
+          className="absolute left-1/2 top-1/2 h-full w-[56.25%] max-w-none"
+          style={{
+            transform: `translate(-50%, -50%) rotate(${rotation})`,
+          }}
+        >
+          <MediaFrame ad={ad} isSingleAd={isSingleAd} fillScreen={false} />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="h-full w-full">
-      <MediaFrame ad={ad} isSingleAd={isSingleAd} fillScreen={fillScreen} />
+      <MediaFrame
+        ad={ad}
+        isSingleAd={isSingleAd}
+        fillScreen={displayMode === "fill"}
+      />
     </div>
   );
 }
