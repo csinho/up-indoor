@@ -1,6 +1,6 @@
 import { createFileRoute, Link, useRouter } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { Eye, EyeOff, LoaderCircle, LockKeyhole, Radio } from "lucide-react";
+import { Eye, EyeOff, LoaderCircle, LockKeyhole } from "lucide-react";
 import { toast } from "sonner";
 
 import { useAuth } from "@/lib/auth";
@@ -39,9 +39,7 @@ function LoginPage() {
       <div className="mx-auto flex min-h-screen max-w-6xl flex-col justify-center gap-10 px-4 py-12 md:px-8 lg:grid lg:grid-cols-[1.1fr_0.9fr] lg:items-center">
         <section className="max-w-2xl">
           <div className="inline-flex items-center gap-3 rounded-full border border-border/70 bg-card px-4 py-2 text-sm text-muted-foreground">
-            <div className="grid h-8 w-8 place-items-center rounded-xl gradient-brand text-brand-foreground">
-              <Radio className="h-4 w-4" />
-            </div>
+            <BrandLogo className="h-8 w-8" />
             Midia Indoor
           </div>
           <h1 className="mt-6 text-4xl font-bold tracking-tight text-foreground md:text-5xl">

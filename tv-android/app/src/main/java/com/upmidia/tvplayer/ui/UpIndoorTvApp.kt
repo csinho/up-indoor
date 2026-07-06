@@ -55,7 +55,7 @@ import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
@@ -71,7 +71,7 @@ import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
-import com.upmidia.tvplayer.data.BackendConfig
+import com.upmidia.tvplayer.R
 import com.upmidia.tvplayer.data.DeviceSessionStore
 import com.upmidia.tvplayer.data.TvBackendException
 import com.upmidia.tvplayer.data.TvManifestRepository
@@ -189,7 +189,14 @@ private fun ActivationScreen(
       Column(
         modifier = Modifier.padding(24.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
       ) {
+        Image(
+          painter = painterResource(R.drawable.up_indoor_mascot),
+          contentDescription = "Up Indoor",
+          modifier = Modifier.height(120.dp),
+          contentScale = ContentScale.Fit,
+        )
         Text(
           text = "Ativacao da TV",
           style = MaterialTheme.typography.headlineSmall,
@@ -374,7 +381,14 @@ private fun TvPlayerRoute(
       message = current.message,
       onResetPairing = onResetPairing,
     )
-    is ManifestUiState.Ready -> PlayerScreen(manifest = current.manifest)
+    is ManifestUiState.Ready ->
+      if (appInForeground) {
+        PlayerScreen(manifest = current.manifest)
+      } else {
+        Box(
+          modifier = Modifier.fillMaxSize().background(Color.Black),
+        )
+      }
   }
 }
 
