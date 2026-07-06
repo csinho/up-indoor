@@ -4,15 +4,15 @@ plugins {
 }
 
 android {
-  namespace = "com.upmidia.tvplayer"
+  namespace = "com.upindoor.tvplayer"
   compileSdk = 36
 
   defaultConfig {
-    applicationId = "com.upmidia.tvplayer"
+    applicationId = "com.upindoor.tvplayer"
     minSdk = 26
     targetSdk = 36
-    versionCode = 15
-    versionName = "0.2.5"
+    versionCode = 17
+    versionName = "0.3.1"
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
 
@@ -63,6 +63,8 @@ dependencies {
   implementation("androidx.media3:media3-common:1.10.1")
   implementation("androidx.media3:media3-exoplayer:1.10.1")
   implementation("androidx.media3:media3-ui:1.10.1")
+
+  implementation("com.google.zxing:core:3.5.3")
 
   debugImplementation("androidx.compose.ui:ui-tooling")
   debugImplementation("androidx.compose.ui:ui-test-manifest")

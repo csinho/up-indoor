@@ -1,15 +1,15 @@
-package com.upmidia.tvplayer.data
+package com.upindoor.tvplayer.data
 
 import android.os.Build
-import com.upmidia.tvplayer.BuildConfig
-import com.upmidia.tvplayer.model.TvDeviceSession
-import com.upmidia.tvplayer.model.TvDisplayMode
-import com.upmidia.tvplayer.model.TvLayoutRegion
-import com.upmidia.tvplayer.model.TvOrientation
-import com.upmidia.tvplayer.model.TvRegionItem
-import com.upmidia.tvplayer.model.TvRegionItemType
-import com.upmidia.tvplayer.model.TvRegionType
-import com.upmidia.tvplayer.model.TvScreenManifest
+import com.upindoor.tvplayer.BuildConfig
+import com.upindoor.tvplayer.model.TvDeviceSession
+import com.upindoor.tvplayer.model.TvDisplayMode
+import com.upindoor.tvplayer.model.TvLayoutRegion
+import com.upindoor.tvplayer.model.TvOrientation
+import com.upindoor.tvplayer.model.TvRegionItem
+import com.upindoor.tvplayer.model.TvRegionItemType
+import com.upindoor.tvplayer.model.TvRegionType
+import com.upindoor.tvplayer.model.TvScreenManifest
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -19,6 +19,20 @@ import java.io.InputStreamReader
 import java.net.HttpURLConnection
 import java.net.URL
 
+data class TvBootstrapResult(
+  val deviceCode: String,
+  val paired: Boolean,
+  val screenId: String?,
+  val status: String,
+  val qrPayload: String?,
+)
+
+data class TvPairingStatusResult(
+  val paired: Boolean,
+  val screenId: String?,
+  val status: String,
+)
+
 class TvBackendException(
   val statusCode: Int,
   val errorCode: String?,
@@ -26,6 +40,41 @@ class TvBackendException(
 ) : IllegalStateException(message)
 
 class TvManifestRepository {
+  suspend fun bootstrapDevice(session: TvDeviceSession): TvBootstrapResult {
+    return withContext(Dispatchers.IO) {
+      val baseUrl = normalizeBaseUrl(session.apiBaseUrl)
+      val payload =
+        JSONObject()
+          .put("deviceCode", session.deviceCode)
+          .put("deviceName", "${Build.MANUFACTURER} ${Build.MODEL}".trim())
+          .put("platform", "android_tv")
+          .put("appVersion", BuildConfig.VERSION_NAME)
+          .put("osVersion", Build.VERSION.RELEASE ?: "unknown")
+
+      val json = postJson("$baseUrl/functions/v1/tv-device-bootstrap", payload)
+      TvBootstrapResult(
+        deviceCode = json.getString("deviceCode"),
+        paired = json.optBoolean("paired", false),
+        screenId = json.optString("screenId").ifBlank { null },
+        status = json.optString("status", "pending"),
+        qrPayload = json.optString("qrPayload").ifBlank { null },
+      )
+    }
+  }
+
+  suspend fun getPairingStatus(session: TvDeviceSession): TvPairingStatusResult {
+    return withContext(Dispatchers.IO) {
+      val baseUrl = normalizeBaseUrl(session.apiBaseUrl)
+      val payload = JSONObject().put("deviceCode", session.deviceCode)
+      val json = postJson("$baseUrl/functions/v1/tv-pairing-status", payload)
+      TvPairingStatusResult(
+        paired = json.optBoolean("paired", false),
+        screenId = json.optString("screenId").ifBlank { null },
+        status = json.optString("status", "pending"),
+      )
+    }
+  }
+
   suspend fun syncDeviceAndLoadManifest(session: TvDeviceSession): TvScreenManifest {
     return withContext(Dispatchers.IO) {
       val baseUrl = normalizeBaseUrl(session.apiBaseUrl)

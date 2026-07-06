@@ -2,16 +2,22 @@ import { createLayoutRegionsFromPreset } from "./layout-presets";
 import type {
   Ad,
   AdInput,
+  Category,
+  Company,
+  CompanyInput,
+  CompanyScreen,
   LayoutRegion,
   LayoutRegionItem,
   LayoutTemplate,
   LayoutTemplateInput,
   Screen,
   ScreenInput,
+  Store,
+  StoreInput,
   TvDevice,
 } from "./types";
 import { isAdRunningNow, sortAdsForPlayback } from "./ad-utils";
-import { supabase, supabaseEnabled } from "./supabase";
+import { functionsUrl, supabase, supabaseEnabled } from "./supabase";
 
 /**
  * Camada de acesso a dados. Se VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY
@@ -42,7 +48,7 @@ import { supabase, supabaseEnabled } from "./supabase";
  *   );
  */
 
-const STORAGE_KEY = "midia-indoor-db-v1";
+const STORAGE_KEY = "up-indoor-db-v1";
 
 interface Db {
   screens: Screen[];
@@ -358,6 +364,7 @@ export async function createScreen(
     playlist_updated_at: now,
     sound_enabled: input.sound_enabled ?? false,
     volume: input.volume ?? 50,
+    store_id: input.store_id ?? null,
   };
   if (supabaseEnabled && supabase) {
     const { data, error } = await supabase
@@ -673,6 +680,7 @@ export async function createAd(
     created_at: new Date().toISOString(),
     position,
     preferred_orientation: input.preferred_orientation ?? "any",
+    company_id: input.company_id ?? null,
   };
   if (supabaseEnabled && supabase) {
     const { data, error } = await supabase
@@ -696,10 +704,14 @@ export async function updateAd(id: string, patch: Partial<Ad>): Promise<Ad> {
       normalizeAdPosition(normalizedPatch.position) ?? undefined;
   }
 
+  const cleanPatch = Object.fromEntries(
+    Object.entries(normalizedPatch).filter(([, value]) => value !== undefined),
+  ) as Partial<Ad>;
+
   if (supabaseEnabled && supabase) {
     const { data, error } = await supabase
       .from("ads")
-      .update(normalizedPatch)
+      .update(cleanPatch)
       .eq("id", id)
       .select()
       .single();
@@ -735,4 +747,313 @@ export async function getPlayerData(screenId: string) {
       (ad.type === "image" || ad.type === "video"),
   );
   return { screen, ads: sortAdsForPlayback(running) };
+}
+
+// ---------- TV pairing ----------
+export interface PairTvDeviceInput {
+  screenId: string;
+  qrPayload?: string;
+  deviceCode?: string;
+  pairingToken?: string;
+}
+
+export interface PairTvDeviceResult {
+  deviceId: string;
+  deviceCode: string;
+  screenId: string;
+  status: string;
+  pairedAt: string | null;
+}
+
+export async function pairTvDevice(
+  input: PairTvDeviceInput,
+): Promise<PairTvDeviceResult> {
+  if (!supabaseEnabled || !supabase) {
+    throw new Error("Pareamento por QR requer Supabase configurado.");
+  }
+
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+
+  if (!session?.access_token) {
+    throw new Error("Faça login para parear dispositivos.");
+  }
+
+  const url = functionsUrl ?? `${import.meta.env.VITE_SUPABASE_URL}/functions/v1`;
+  const response = await fetch(`${url}/tv-pair-device`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${session.access_token}`,
+      apikey: import.meta.env.VITE_SUPABASE_ANON_KEY as string,
+    },
+    body: JSON.stringify({
+      screenId: input.screenId,
+      qrPayload: input.qrPayload,
+      deviceCode: input.deviceCode,
+      pairingToken: input.pairingToken,
+    }),
+  });
+
+  const payload = (await response.json()) as {
+    error?: string;
+    message?: string;
+    deviceId?: string;
+    deviceCode?: string;
+    screenId?: string;
+    status?: string;
+    pairedAt?: string | null;
+  };
+
+  if (!response.ok) {
+    throw new Error(payload.message ?? "Falha ao parear dispositivo.");
+  }
+
+  return {
+    deviceId: payload.deviceId ?? "",
+    deviceCode: payload.deviceCode ?? "",
+    screenId: payload.screenId ?? input.screenId,
+    status: payload.status ?? "paired",
+    pairedAt: payload.pairedAt ?? null,
+  };
+}
+
+// ---------- Categories ----------
+export async function listCategories(): Promise<Category[]> {
+  if (supabaseEnabled && supabase) {
+    const { data, error } = await supabase
+      .from("categories")
+      .select("*")
+      .order("name", { ascending: true });
+    if (error) throw error;
+    return (data ?? []) as Category[];
+  }
+  return [];
+}
+
+// ---------- Stores ----------
+export async function listStores(): Promise<Store[]> {
+  if (supabaseEnabled && supabase) {
+    const { data, error } = await supabase
+      .from("stores")
+      .select("*")
+      .order("created_at", { ascending: false });
+    if (error) throw error;
+    return (data ?? []) as Store[];
+  }
+  return [];
+}
+
+export async function createStore(input: StoreInput): Promise<Store> {
+  const now = new Date().toISOString();
+  const store: Store = {
+    id: crypto.randomUUID(),
+    name: input.name.trim() || "Novo ponto",
+    address: input.address?.trim() ?? "",
+    city: input.city?.trim() ?? "",
+    category_id: input.category_id ?? null,
+    active: input.active ?? true,
+    notes: input.notes?.trim() ?? "",
+    created_at: now,
+    updated_at: now,
+  };
+
+  if (supabaseEnabled && supabase) {
+    const { data, error } = await supabase
+      .from("stores")
+      .insert(store)
+      .select()
+      .single();
+    if (error) throw error;
+    return data as Store;
+  }
+
+  throw new Error("Cadastro de pontos requer Supabase.");
+}
+
+export async function updateStore(
+  id: string,
+  patch: Partial<Store>,
+): Promise<Store> {
+  const payload = { ...patch, updated_at: new Date().toISOString() };
+
+  if (supabaseEnabled && supabase) {
+    const { data, error } = await supabase
+      .from("stores")
+      .update(payload)
+      .eq("id", id)
+      .select()
+      .single();
+    if (error) throw error;
+    return data as Store;
+  }
+
+  throw new Error("Cadastro de pontos requer Supabase.");
+}
+
+export async function deleteStore(id: string): Promise<void> {
+  if (supabaseEnabled && supabase) {
+    const { error } = await supabase.from("stores").delete().eq("id", id);
+    if (error) throw error;
+    return;
+  }
+  throw new Error("Cadastro de pontos requer Supabase.");
+}
+
+// ---------- Companies ----------
+export async function listCompanies(): Promise<Company[]> {
+  if (supabaseEnabled && supabase) {
+    const { data, error } = await supabase
+      .from("companies")
+      .select("*")
+      .order("created_at", { ascending: false });
+    if (error) throw error;
+    return (data ?? []) as Company[];
+  }
+  return [];
+}
+
+export async function createCompany(input: CompanyInput): Promise<Company> {
+  const now = new Date().toISOString();
+  const company: Company = {
+    id: crypto.randomUUID(),
+    name: input.name.trim() || "Nova empresa",
+    category_id: input.category_id ?? null,
+    contact_name: input.contact_name?.trim() ?? "",
+    contact_email: input.contact_email?.trim() ?? "",
+    contact_phone: input.contact_phone?.trim() ?? "",
+    active: input.active ?? true,
+    notes: input.notes?.trim() ?? "",
+    billing_status: input.billing_status ?? "active",
+    monthly_amount_cents: Math.max(0, Number(input.monthly_amount_cents) || 0),
+    payment_due_day: Math.min(28, Math.max(1, Number(input.payment_due_day) || 10)),
+    last_payment_at: input.last_payment_at ?? null,
+    next_payment_at: input.next_payment_at ?? null,
+    created_at: now,
+    updated_at: now,
+  };
+
+  if (supabaseEnabled && supabase) {
+    const { data, error } = await supabase
+      .from("companies")
+      .insert(company)
+      .select()
+      .single();
+    if (error) throw error;
+    return data as Company;
+  }
+
+  throw new Error("Cadastro de empresas requer Supabase.");
+}
+
+export async function updateCompany(
+  id: string,
+  patch: Partial<Company>,
+): Promise<Company> {
+  const payload = { ...patch, updated_at: new Date().toISOString() };
+
+  if (supabaseEnabled && supabase) {
+    const { data, error } = await supabase
+      .from("companies")
+      .update(payload)
+      .eq("id", id)
+      .select()
+      .single();
+    if (error) throw error;
+
+    if (patch.billing_status === "suspended") {
+      await supabase
+        .from("ads")
+        .update({ active: false })
+        .eq("company_id", id);
+    }
+
+    return data as Company;
+  }
+
+  throw new Error("Cadastro de empresas requer Supabase.");
+}
+
+export async function deleteCompany(id: string): Promise<void> {
+  if (supabaseEnabled && supabase) {
+    const { error } = await supabase.from("companies").delete().eq("id", id);
+    if (error) throw error;
+    return;
+  }
+  throw new Error("Cadastro de empresas requer Supabase.");
+}
+
+// ---------- Company screens ----------
+export async function listCompanyScreens(): Promise<CompanyScreen[]> {
+  if (supabaseEnabled && supabase) {
+    const { data, error } = await supabase.from("company_screens").select("*");
+    if (error) throw error;
+    return (data ?? []) as CompanyScreen[];
+  }
+  return [];
+}
+
+export async function assignScreenToCompany(
+  companyId: string,
+  screenId: string,
+): Promise<void> {
+  if (!supabaseEnabled || !supabase) {
+    throw new Error("Vínculo TV-empresa requer Supabase.");
+  }
+
+  const { error } = await supabase.from("company_screens").upsert({
+    company_id: companyId,
+    screen_id: screenId,
+  });
+
+  if (error) throw error;
+}
+
+export async function removeScreenFromCompany(
+  companyId: string,
+  screenId: string,
+): Promise<void> {
+  if (!supabaseEnabled || !supabase) {
+    throw new Error("Vínculo TV-empresa requer Supabase.");
+  }
+
+  const { error } = await supabase
+    .from("company_screens")
+    .delete()
+    .eq("company_id", companyId)
+    .eq("screen_id", screenId);
+
+  if (error) throw error;
+}
+
+export async function syncScreenCompanies(
+  screenId: string,
+  companyIds: string[],
+): Promise<void> {
+  if (!supabaseEnabled || !supabase) {
+    throw new Error("Vínculo TV-empresa requer Supabase.");
+  }
+
+  const { data: existing, error: listError } = await supabase
+    .from("company_screens")
+    .select("company_id")
+    .eq("screen_id", screenId);
+
+  if (listError) throw listError;
+
+  const current = new Set((existing ?? []).map((row) => String(row.company_id)));
+  const desired = new Set(companyIds);
+
+  await Promise.all(
+    [...desired]
+      .filter((companyId) => !current.has(companyId))
+      .map((companyId) => assignScreenToCompany(companyId, screenId)),
+  );
+
+  await Promise.all(
+    [...current]
+      .filter((companyId) => !desired.has(companyId))
+      .map((companyId) => removeScreenFromCompany(companyId, screenId)),
+  );
 }

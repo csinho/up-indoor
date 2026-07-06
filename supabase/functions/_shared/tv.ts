@@ -63,6 +63,73 @@ export function buildPairingCode() {
   return Math.floor(100000 + Math.random() * 900000).toString();
 }
 
+export const PAIRING_TOKEN_TTL_MINUTES = 10;
+
+export function buildPairingToken() {
+  return crypto.randomUUID().replace(/-/g, "");
+}
+
+export function pairingTokenExpiresAt() {
+  return new Date(
+    Date.now() + PAIRING_TOKEN_TTL_MINUTES * 60 * 1000,
+  ).toISOString();
+}
+
+export function isPairingTokenExpired(expiresAt: string | null | undefined) {
+  if (!expiresAt) return true;
+  return new Date(expiresAt) <= new Date();
+}
+
+export function createUserClient(request: Request) {
+  const supabaseUrl = Deno.env.get("SUPABASE_URL");
+  const anonKey = Deno.env.get("SUPABASE_ANON_KEY");
+  const authHeader = request.headers.get("Authorization");
+
+  if (!supabaseUrl || !anonKey || !authHeader) {
+    return null;
+  }
+
+  return createClient(supabaseUrl, anonKey, {
+    global: { headers: { Authorization: authHeader } },
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+    },
+  });
+}
+
+export function parseQrPairingPayload(raw: string) {
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const deviceCode = String(parsed.d ?? parsed.deviceCode ?? "")
+      .trim()
+      .toUpperCase();
+    const pairingToken = String(parsed.t ?? parsed.pairingToken ?? "").trim();
+    const apiBaseUrl = String(parsed.api ?? "").trim() || null;
+
+    if (!deviceCode || !pairingToken) {
+      return null;
+    }
+
+    return { deviceCode, pairingToken, apiBaseUrl };
+  } catch {
+    return null;
+  }
+}
+
+export function buildQrPairingPayload(input: {
+  deviceCode: string;
+  pairingToken: string;
+  apiBaseUrl: string;
+}) {
+  return JSON.stringify({
+    v: 1,
+    d: input.deviceCode,
+    t: input.pairingToken,
+    api: input.apiBaseUrl,
+  });
+}
+
 export function isInlineMediaSource(source: string | null | undefined) {
   return Boolean(source?.startsWith("data:"));
 }

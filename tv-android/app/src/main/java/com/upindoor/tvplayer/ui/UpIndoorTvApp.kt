@@ -1,4 +1,4 @@
-package com.upmidia.tvplayer.ui
+package com.upindoor.tvplayer.ui
 
 import android.content.Context
 import android.graphics.BitmapFactory
@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.absoluteOffset
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
@@ -53,10 +54,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.TransformOrigin
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
@@ -75,17 +76,17 @@ import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
-import com.upmidia.tvplayer.R
-import com.upmidia.tvplayer.data.BackendConfig
-import com.upmidia.tvplayer.data.DeviceSessionStore
-import com.upmidia.tvplayer.data.TvBackendException
-import com.upmidia.tvplayer.data.TvManifestRepository
-import com.upmidia.tvplayer.model.TvDeviceSession
-import com.upmidia.tvplayer.model.TvLayoutRegion
-import com.upmidia.tvplayer.model.TvRegionItem
-import com.upmidia.tvplayer.model.TvRegionItemType
-import com.upmidia.tvplayer.model.TvRegionType
-import com.upmidia.tvplayer.model.TvScreenManifest
+import com.upindoor.tvplayer.R
+import com.upindoor.tvplayer.data.BackendConfig
+import com.upindoor.tvplayer.data.DeviceSessionStore
+import com.upindoor.tvplayer.data.TvBackendException
+import com.upindoor.tvplayer.data.TvManifestRepository
+import com.upindoor.tvplayer.model.TvDeviceSession
+import com.upindoor.tvplayer.model.TvLayoutRegion
+import com.upindoor.tvplayer.model.TvRegionItem
+import com.upindoor.tvplayer.model.TvRegionItemType
+import com.upindoor.tvplayer.model.TvRegionType
+import com.upindoor.tvplayer.model.TvScreenManifest
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -117,10 +118,10 @@ fun UpIndoorTvApp() {
     color = MaterialTheme.colorScheme.background,
   ) {
     if (session.screenId.isNullOrBlank()) {
-      ActivationScreen(
+      PairingScreen(
         session = session,
-        onActivate = { screenId, apiBaseUrl ->
-          sessionStore.save(screenId, apiBaseUrl)
+        onPaired = { screenId ->
+          sessionStore.save(screenId)
           session = sessionStore.load()
         },
       )
@@ -157,24 +158,53 @@ private fun shouldStopPlaybackForError(error: Throwable): Boolean {
 }
 
 @Composable
-private fun ActivationScreen(
+private fun PairingScreen(
   session: TvDeviceSession,
-  onActivate: (screenId: String, apiBaseUrl: String?) -> Unit,
+  onPaired: (screenId: String) -> Unit,
 ) {
-  var screenId by remember { mutableStateOf("tv") }
-  var apiBaseUrl by remember { mutableStateOf(BackendConfig.defaultBaseUrl) }
-  val fieldColors =
-    OutlinedTextFieldDefaults.colors(
-      focusedTextColor = Color.White,
-      unfocusedTextColor = Color.White,
-      focusedLabelColor = Color(0xFF67E8F9),
-      unfocusedLabelColor = Color(0xFFCBD5E1),
-      focusedPlaceholderColor = Color(0xFF64748B),
-      unfocusedPlaceholderColor = Color(0xFF64748B),
-      cursorColor = Color(0xFF67E8F9),
-      focusedBorderColor = Color(0xFF22D3EE),
-      unfocusedBorderColor = Color(0xFF475569),
-    )
+  val repository = remember { TvManifestRepository() }
+  var qrPayload by remember { mutableStateOf<String?>(null) }
+  var statusMessage by remember { mutableStateOf("Preparando pareamento...") }
+  var errorMessage by remember { mutableStateOf<String?>(null) }
+
+  LaunchedEffect(session.deviceCode) {
+    while (true) {
+      try {
+        val bootstrap = repository.bootstrapDevice(session)
+        if (bootstrap.paired && !bootstrap.screenId.isNullOrBlank()) {
+          onPaired(bootstrap.screenId)
+          return@LaunchedEffect
+        }
+
+        qrPayload = bootstrap.qrPayload
+        statusMessage = "Escaneie este QR no dashboard"
+
+        while (true) {
+          delay(3_000)
+          val pairingStatus = repository.getPairingStatus(session)
+          if (pairingStatus.paired && !pairingStatus.screenId.isNullOrBlank()) {
+            onPaired(pairingStatus.screenId)
+            return@LaunchedEffect
+          }
+
+          statusMessage =
+            when (pairingStatus.status) {
+              "pending" -> "Aguardando pareamento no dashboard..."
+              else -> "Status: ${pairingStatus.status}"
+            }
+        }
+      } catch (error: Throwable) {
+        errorMessage = error.message ?: "Falha ao conectar com o servidor"
+        delay(5_000)
+        errorMessage = null
+      }
+    }
+  }
+
+  val qrBitmap =
+    remember(qrPayload) {
+      qrPayload?.let { QrCodeUtils.generateBitmap(it, 512) }
+    }
 
   Box(
     modifier =
@@ -196,7 +226,7 @@ private fun ActivationScreen(
           Modifier
             .verticalScroll(rememberScrollState())
             .padding(20.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
       ) {
         Image(
@@ -206,108 +236,59 @@ private fun ActivationScreen(
           contentScale = ContentScale.Fit,
         )
         Text(
-          text = "Ativacao da TV",
+          text = "Pareamento da TV",
           style = MaterialTheme.typography.headlineSmall,
           color = Color.White,
         )
         Text(
-          text = "Informe o Screen ID do dashboard e toque em Ativar.",
+          text = statusMessage,
           color = Color(0xFFCBD5E1),
           lineHeight = 20.sp,
         )
 
-        Row(
-          modifier = Modifier.fillMaxWidth(),
-          horizontalArrangement = Arrangement.spacedBy(12.dp),
-          verticalAlignment = Alignment.CenterVertically,
-        ) {
-          Card(
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF111827)),
-            modifier = Modifier.weight(1f),
-          ) {
-            Column(modifier = Modifier.padding(12.dp)) {
-              Text(
-                text = "Codigo do dispositivo",
-                color = Color(0xFF94A3B8),
-                fontSize = 13.sp,
-              )
-              Spacer(modifier = Modifier.height(4.dp))
-              Text(
-                text = session.deviceCode,
-                color = Color.White,
-                fontSize = 20.sp,
-                fontWeight = FontWeight.Bold,
-              )
-            }
-          }
-
-          val activateInteractionSource = remember { MutableInteractionSource() }
-          val isActivateFocused by activateInteractionSource.collectIsFocusedAsState()
-
-          Button(
-            onClick = {
-              if (screenId.isNotBlank()) onActivate(screenId, apiBaseUrl)
-            },
+        if (qrBitmap != null) {
+          Image(
+            bitmap = qrBitmap.asImageBitmap(),
+            contentDescription = "QR de pareamento",
             modifier =
               Modifier
-                .widthIn(min = 180.dp)
-                .height(72.dp),
-            interactionSource = activateInteractionSource,
-            shape = RoundedCornerShape(14.dp),
-            colors =
-              ButtonDefaults.buttonColors(
-                containerColor =
-                  if (isActivateFocused) {
-                    Color(0xFF22D3EE)
-                  } else {
-                    Color(0xFF6366F1)
-                  },
-                contentColor =
-                  if (isActivateFocused) {
-                    Color(0xFF020617)
-                  } else {
-                    Color.White
-                  },
-              ),
-            border =
-              if (isActivateFocused) {
-                BorderStroke(4.dp, Color.White)
-              } else {
-                BorderStroke(1.dp, Color(0xFF475569))
-              },
+                .size(280.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(Color.White)
+                .padding(12.dp),
+          )
+        } else {
+          CircularProgressIndicator(color = Color(0xFF22D3EE))
+        }
+
+        Card(
+          colors = CardDefaults.cardColors(containerColor = Color(0xFF111827)),
+          modifier = Modifier.fillMaxWidth(),
+        ) {
+          Column(
+            modifier = Modifier.padding(12.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
           ) {
             Text(
-              text = "Ativar",
-              fontSize = 18.sp,
-              fontWeight = if (isActivateFocused) FontWeight.Bold else FontWeight.SemiBold,
+              text = "Codigo do dispositivo",
+              color = Color(0xFF94A3B8),
+              fontSize = 13.sp,
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+              text = session.deviceCode,
+              color = Color.White,
+              fontSize = 24.sp,
+              fontWeight = FontWeight.Bold,
             )
           }
         }
 
-        Row(
-          modifier = Modifier.fillMaxWidth(),
-          horizontalArrangement = Arrangement.spacedBy(12.dp),
-          verticalAlignment = Alignment.CenterVertically,
-        ) {
-          OutlinedTextField(
-            value = screenId,
-            onValueChange = { screenId = it },
-            label = { Text("Screen ID") },
-            placeholder = { Text("Ex.: tv") },
-            singleLine = true,
-            modifier = Modifier.weight(1f),
-            colors = fieldColors,
-          )
-
-          OutlinedTextField(
-            value = apiBaseUrl,
-            onValueChange = { apiBaseUrl = it },
-            label = { Text("Backend URL") },
-            placeholder = { Text("https://...") },
-            singleLine = true,
-            modifier = Modifier.weight(1.4f),
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
-            colors = fieldColors,
+        errorMessage?.let { message ->
+          Text(
+            text = message,
+            color = Color(0xFFF87171),
+            fontSize = 14.sp,
           )
         }
       }
@@ -691,7 +672,7 @@ private fun ImageRegionView(
   }
 
   Image(
-    bitmap = requireNotNull(imageResult.bitmap),
+    bitmap = imageResult.bitmap!!,
     contentDescription = item.title,
     modifier = Modifier.fillMaxSize(),
     contentScale = if (shouldCropMedia) ContentScale.Crop else ContentScale.Fit,

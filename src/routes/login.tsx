@@ -9,6 +9,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { BrandLogo } from "@/components/brand-logo";
+import { PwaInstallButton } from "@/components/pwa-install-prompt";
 
 export const Route = createFileRoute("/login")({
   ssr: false,
@@ -36,11 +38,14 @@ function LoginPage() {
 
   return (
     <div className="min-h-screen bg-background">
+      <div className="absolute right-4 top-4 z-10">
+        <PwaInstallButton />
+      </div>
       <div className="mx-auto flex min-h-screen max-w-6xl flex-col justify-center gap-10 px-4 py-12 md:px-8 lg:grid lg:grid-cols-[1.1fr_0.9fr] lg:items-center">
         <section className="max-w-2xl">
           <div className="inline-flex items-center gap-3 rounded-full border border-border/70 bg-card px-4 py-2 text-sm text-muted-foreground">
             <BrandLogo className="h-8 w-8" />
-            Midia Indoor
+            Up Indoor
           </div>
           <h1 className="mt-6 text-4xl font-bold tracking-tight text-foreground md:text-5xl">
             Entre para gerenciar suas TVs e campanhas.

@@ -1,4 +1,4 @@
-package com.upmidia.tvplayer.data
+package com.upindoor.tvplayer.data
 
 object BackendConfig {
   const val defaultBaseUrl = "https://dtokhpovymvesunjdmbn.supabase.co"

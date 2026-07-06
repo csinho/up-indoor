@@ -33,7 +33,50 @@ type AdRow = {
   position: number;
   preferred_orientation: "landscape" | "portrait" | "any";
   screen_ids: string[];
+  company_id: string | null;
+  companies?: {
+    category_id: string | null;
+    billing_status: "active" | "overdue" | "suspended";
+    active: boolean;
+  } | null;
 };
+
+type ScreenWithStoreRow = ScreenRow & {
+  store_id: string | null;
+  stores?: {
+    category_id: string | null;
+  } | null;
+};
+
+function adMatchesScreen(
+  ad: AdRow,
+  screenId: string,
+  storeCategoryId: string | null,
+  linkedCompanyIds: Set<string>,
+) {
+  if ((ad.screen_ids ?? []).length > 0) {
+    return ad.screen_ids.includes(screenId);
+  }
+
+  if (!ad.company_id || !ad.companies) {
+    return false;
+  }
+
+  const company = ad.companies;
+  if (!company.active || company.billing_status === "suspended") {
+    return false;
+  }
+
+  if (linkedCompanyIds.has(ad.company_id)) {
+    return true;
+  }
+
+  return Boolean(
+    company.category_id &&
+      storeCategoryId &&
+      company.category_id === storeCategoryId,
+  );
+}
 
 type LayoutTemplateRow = {
   id: string;
@@ -145,7 +188,7 @@ Deno.serve(async (request: Request) => {
     const { data: screen, error: screenError } = await supabase
       .from("screens")
       .select(
-        "id, name, orientation, display_mode, resolution_width, resolution_height, layout_template_id, playlist_version, active",
+        "id, name, orientation, display_mode, resolution_width, resolution_height, layout_template_id, playlist_version, active, store_id, stores(category_id)",
       )
       .eq("id", device.screen_id)
       .single();
@@ -154,7 +197,7 @@ Deno.serve(async (request: Request) => {
       throw screenError;
     }
 
-    const typedScreen = screen as ScreenRow;
+    const typedScreen = screen as ScreenWithStoreRow;
     if (!typedScreen.active) {
       return jsonResponse(
         {
@@ -165,18 +208,33 @@ Deno.serve(async (request: Request) => {
       );
     }
 
+    const storeCategoryId = typedScreen.stores?.category_id ?? null;
+
+    const { data: companyLinks, error: companyLinksError } = await supabase
+      .from("company_screens")
+      .select("company_id")
+      .eq("screen_id", typedScreen.id);
+
+    if (companyLinksError) {
+      throw companyLinksError;
+    }
+
+    const linkedCompanyIds = new Set(
+      (companyLinks ?? []).map((link) => String(link.company_id)),
+    );
+
     const { data: adsData, error: adsError } = await supabase
       .from("ads")
       .select(
-        "id, title, type, source, duration, active, starts_at, ends_at, position, preferred_orientation, screen_ids",
-      )
-      .contains("screen_ids", [typedScreen.id]);
+        "id, title, type, source, duration, active, starts_at, ends_at, position, preferred_orientation, screen_ids, company_id, companies(category_id, billing_status, active)",
+      );
 
     if (adsError) {
       throw adsError;
     }
 
     const filteredAds = ((adsData ?? []) as AdRow[])
+      .filter((ad) => adMatchesScreen(ad, typedScreen.id, storeCategoryId, linkedCompanyIds))
       .filter((ad) => isAdRunningNow(ad))
       .filter((ad) => ad.type === "image" || ad.type === "video")
       .filter((ad) =>

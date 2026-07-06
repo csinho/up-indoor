@@ -12,7 +12,9 @@ import { useEffect, type ReactNode } from "react";
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
 import { AuthProvider } from "../lib/auth";
+import { ThemeProvider } from "../lib/theme-provider";
 import { Toaster } from "@/components/ui/sonner";
+import { PwaManager } from "@/components/pwa-manager";
 
 function NotFoundComponent() {
   return (
@@ -79,18 +81,19 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Midia Indoor — Gestão de TVs e Anúncios" },
+      { name: "theme-color", content: "#6366f1" },
+      { title: "Up Indoor — Mídia indoor para TVs e campanhas" },
       {
         name: "description",
         content:
-          "Painel moderno para gerenciar TVs, campanhas e player de mídia indoor em tempo real.",
+          "Mídia indoor simples para TVs, lojas e campanhas locais.",
       },
-      { name: "author", content: "Midia Indoor" },
-      { property: "og:title", content: "Midia Indoor — Gestão de TVs e Anúncios" },
+      { name: "author", content: "Up Indoor" },
+      { property: "og:title", content: "Up Indoor — Mídia indoor para TVs e campanhas" },
       {
         property: "og:description",
         content:
-          "Painel moderno para gerenciar TVs, campanhas e player de mídia indoor em tempo real.",
+          "Mídia indoor simples para TVs, lojas e campanhas locais.",
       },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
@@ -105,6 +108,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { rel: "icon", href: "/favicon-32x32.png", sizes: "32x32", type: "image/png" },
       { rel: "icon", href: "/favicon-16x16.png", sizes: "16x16", type: "image/png" },
       { rel: "apple-touch-icon", href: "/apple-touch-icon.png" },
+      { rel: "manifest", href: "/manifest.webmanifest" },
     ],
   }),
   shellComponent: RootShell,
@@ -118,6 +122,20 @@ function RootShell({ children }: { children: ReactNode }) {
     <html lang="pt-BR" suppressHydrationWarning>
       <head>
         <HeadContent />
+        <script
+          suppressHydrationWarning
+          dangerouslySetInnerHTML={{
+            __html: `(function () {
+  try {
+    var stored = localStorage.getItem("up-indoor-theme");
+    var theme = stored === "light" || stored === "dark" ? stored : null;
+    var resolved = theme || (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+    document.documentElement.classList.toggle("dark", resolved === "dark");
+    document.documentElement.style.colorScheme = resolved;
+  } catch (e) {}
+})();`,
+          }}
+        />
         <script
           suppressHydrationWarning
           dangerouslySetInnerHTML={{
@@ -185,10 +203,13 @@ function RootComponent() {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <AuthProvider>
-        <Outlet />
-        <Toaster position="top-right" richColors />
-      </AuthProvider>
+      <ThemeProvider>
+        <AuthProvider>
+          <Outlet />
+          <PwaManager />
+          <Toaster position="top-right" richColors />
+        </AuthProvider>
+      </ThemeProvider>
     </QueryClientProvider>
   );
 }

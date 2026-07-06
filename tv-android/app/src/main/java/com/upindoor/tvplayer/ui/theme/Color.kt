@@ -1,4 +1,4 @@
-package com.upmidia.tvplayer.ui.theme
+package com.upindoor.tvplayer.ui.theme
 
 import androidx.compose.ui.graphics.Color
 

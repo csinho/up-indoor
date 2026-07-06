@@ -14,5 +14,5 @@ dependencyResolutionManagement {
   }
 }
 
-rootProject.name = "UpIndoorTv"
+rootProject.name = "UpIndoor"
 include(":app")

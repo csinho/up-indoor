@@ -1,4 +1,4 @@
-package com.upmidia.tvplayer.model
+package com.upindoor.tvplayer.model
 
 enum class TvOrientation {
   LANDSCAPE,

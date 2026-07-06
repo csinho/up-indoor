@@ -1,4 +1,4 @@
-package com.upmidia.tvplayer
+package com.upindoor.tvplayer
 
 import android.content.pm.ActivityInfo
 import android.os.Bundle
@@ -6,10 +6,10 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.lifecycleScope
-import com.upmidia.tvplayer.data.DeviceSessionStore
-import com.upmidia.tvplayer.data.TvManifestRepository
-import com.upmidia.tvplayer.ui.UpIndoorTvApp
-import com.upmidia.tvplayer.ui.theme.UpIndoorTvTheme
+import com.upindoor.tvplayer.data.DeviceSessionStore
+import com.upindoor.tvplayer.data.TvManifestRepository
+import com.upindoor.tvplayer.ui.UpIndoorTvApp
+import com.upindoor.tvplayer.ui.theme.UpIndoorTvTheme
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {

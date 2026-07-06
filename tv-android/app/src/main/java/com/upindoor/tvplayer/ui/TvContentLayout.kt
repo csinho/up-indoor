@@ -1,8 +1,8 @@
-package com.upmidia.tvplayer.ui
+package com.upindoor.tvplayer.ui
 
-import com.upmidia.tvplayer.model.TvDisplayMode
-import com.upmidia.tvplayer.model.TvOrientation
-import com.upmidia.tvplayer.model.TvScreenManifest
+import com.upindoor.tvplayer.model.TvDisplayMode
+import com.upindoor.tvplayer.model.TvOrientation
+import com.upindoor.tvplayer.model.TvScreenManifest
 
 /**
  * Android TV renderiza sempre em landscape (1920x1080).

@@ -1,4 +1,4 @@
-# Up Indoor TV
+# Up Indoor
 
 Base inicial do app nativo para `Android TV / Google TV`.
 
@@ -13,10 +13,10 @@ Base inicial do app nativo para `Android TV / Google TV`.
 
 ## Estrutura
 
-- `app/src/main/java/com/upmidia/tvplayer/MainActivity.kt`: entrypoint
-- `app/src/main/java/com/upmidia/tvplayer/data`: sessao local e manifesto demo
-- `app/src/main/java/com/upmidia/tvplayer/model`: contratos do manifesto da TV
-- `app/src/main/java/com/upmidia/tvplayer/ui`: telas de ativacao e player
+- `app/src/main/java/com/upindoor/tvplayer/MainActivity.kt`: entrypoint
+- `app/src/main/java/com/upindoor/tvplayer/data`: sessao local e manifesto demo
+- `app/src/main/java/com/upindoor/tvplayer/model`: contratos do manifesto da TV
+- `app/src/main/java/com/upindoor/tvplayer/ui`: telas de ativacao e player
 
 ## Proximos passos esperados
 

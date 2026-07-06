@@ -17,11 +17,16 @@ import {
   Sparkles,
   Database,
   Radio,
-  Clock,
   LoaderCircle,
   LogOut,
+  Moon,
+  QrCode,
+  Sun,
+  Building2,
+  Store,
 } from "lucide-react";
 
+import { BrandLogo } from "@/components/brand-logo";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -30,7 +35,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
-import { Checkbox } from "@/components/ui/checkbox";
 import {
   Select,
   SelectContent,
@@ -63,29 +67,49 @@ import {
   listAds,
   listLayoutTemplates,
   listTvDevices,
+  listCategories,
+  listStores,
+  listCompanies,
+  listCompanyScreens,
   createScreen,
   updateScreen,
   touchScreenPlaylist,
   deleteScreen,
-  createAd,
-  updateAd,
-  deleteAd,
+  syncScreenCompanies,
   createLayoutTemplate,
   updateLayoutTemplate,
   deleteLayoutTemplate,
+  pairTvDevice,
 } from "@/lib/data";
+import { QrPairingScanner } from "@/components/qr-pairing-scanner";
+import { CompaniesTab, PointsTab } from "@/components/org-management";
+import { SearchField, normalizeSearch } from "@/components/list-filters";
+import { ScreenFormDialog } from "@/components/screen-form-dialog";
+import {
+  DEFAULT_PAGE_SIZE,
+  ListPagination,
+  usePaginatedItems,
+} from "@/components/list-pagination";
+import {
+  getConnectionDotClass,
+  getPrimaryTvDevice,
+  getTvConnectionState,
+  summarizeTvStatuses,
+} from "@/lib/tv-status";
+import { MobileBottomNav, type DashboardTab } from "@/components/mobile-bottom-nav";
+import { useIsMobile } from "@/hooks/use-mobile";
+import { PwaInstallButton } from "@/components/pwa-install-prompt";
+import { useTheme } from "@/lib/theme-provider";
 import {
   extractYouTubeId,
   getAdPlaybackStatus,
   getAdPlaybackStatusLabel,
   isAdRunningNow,
-  sortAdsForPlayback,
 } from "@/lib/ad-utils";
 import { useAuth } from "@/lib/auth";
 import { createLayoutRegionsFromPreset, getPresetLabel } from "@/lib/layout-presets";
 import type {
   Ad,
-  AdInput,
   AdOrientation,
   LayoutPresetId,
   LayoutRegionInput,
@@ -97,21 +121,17 @@ import type {
   ScreenDisplayMode,
   ScreenInput,
   TvDevice,
+  Store as StoreType,
+  Company,
+  CompanyScreen,
 } from "@/lib/types";
-import {
-  isInlineMediaSource,
-  supabaseEnabled,
-  uploadAdMediaDataUri,
-  uploadAdMediaFile,
-} from "@/lib/supabase";
+import { supabaseEnabled } from "@/lib/supabase";
 
 export const Route = createFileRoute("/")({
   ssr: false,
   component: Dashboard,
 });
 
-const TV_ONLINE_WINDOW_MS = 35_000;
-const TV_BACKGROUND_WINDOW_MS = 45_000;
 const DISPLAY_MODE_OPTIONS: Array<{
   value: ScreenDisplayMode;
   label: string;
@@ -126,6 +146,9 @@ function Dashboard() {
   const router = useRouter();
   const { user, loading } = useAuth();
   const qc = useQueryClient();
+  const isMobile = useIsMobile();
+  const [activeTab, setActiveTab] = useState<DashboardTab>("overview");
+  const [billingFilter, setBillingFilter] = useState<"all" | "active" | "overdue" | "suspended">("all");
   const screensQ = useQuery({
     queryKey: ["screens"],
     queryFn: listScreens,
@@ -147,6 +170,30 @@ function Dashboard() {
     enabled: !!user,
     refetchInterval: 15_000,
   });
+  const categoriesQ = useQuery({
+    queryKey: ["categories"],
+    queryFn: listCategories,
+    enabled: !!user,
+    retry: 2,
+  });
+  const storesQ = useQuery({
+    queryKey: ["stores"],
+    queryFn: listStores,
+    enabled: !!user,
+    retry: 2,
+  });
+  const companiesQ = useQuery({
+    queryKey: ["companies"],
+    queryFn: listCompanies,
+    enabled: !!user,
+    retry: 2,
+  });
+  const companyScreensQ = useQuery({
+    queryKey: ["companyScreens"],
+    queryFn: listCompanyScreens,
+    enabled: !!user,
+    retry: 2,
+  });
 
   useEffect(() => {
     if (!loading && !user) {
@@ -166,33 +213,53 @@ function Dashboard() {
   const ads = adsQ.data ?? [];
   const layouts = layoutsQ.data ?? [];
   const tvDevices = tvDevicesQ.data ?? [];
+  const categories = categoriesQ.data ?? [];
+  const stores = storesQ.data ?? [];
+  const companies = companiesQ.data ?? [];
+  const companyScreens = companyScreensQ.data ?? [];
   const supportedAds = ads.filter((ad) => ad.type === "image" || ad.type === "video");
 
-  const activeScreens = screens.filter((s) => s.active).length;
+  const tvStats = summarizeTvStatuses(screens, tvDevices);
   const activeAds = supportedAds.filter((ad) => isAdRunningNow(ad)).length;
 
   return (
     <div className="min-h-screen bg-background">
       <TopBar />
-      <main className="mx-auto max-w-7xl px-4 pb-16 pt-8 md:px-8">
+      <main
+        className={`mx-auto max-w-7xl px-4 pt-8 md:px-8 ${isMobile ? "pb-28" : "pb-16"}`}
+      >
+        {activeTab === "overview" ? (
         <HeroHeader
-          totalScreens={screens.length}
-          activeScreens={activeScreens}
-          totalAds={ads.length}
+          tvStats={tvStats}
+          totalAds={supportedAds.length}
           activeAds={activeAds}
+          totalStores={stores.length}
+          totalCompanies={companies.length}
         />
+        ) : null}
 
-        <Tabs defaultValue="overview" className="mt-10">
-          <TabsList className="mb-6 h-11 gap-1 rounded-xl bg-card p-1 shadow-card">
+        <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as DashboardTab)} className={activeTab === "overview" ? "mt-10" : "mt-2"}>
+          <TabsList
+            className={`mb-6 flex h-11 w-full gap-1 overflow-x-auto rounded-xl bg-card p-1 shadow-card [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden ${isMobile ? "hidden" : ""}`}
+          >
             <TabsTrigger
               value="overview"
-              className="gap-2 rounded-lg px-4 data-[state=active]:gradient-brand data-[state=active]:text-brand-foreground data-[state=active]:shadow-glow"
+              className="shrink-0 gap-2 rounded-lg px-4 data-[state=active]:gradient-brand data-[state=active]:text-brand-foreground data-[state=active]:shadow-glow"
             >
               <LayoutDashboard className="h-4 w-4" /> Visão geral
             </TabsTrigger>
             <TabsTrigger
+              value="stores"
+              className="shrink-0 gap-2 rounded-lg px-4 data-[state=active]:gradient-brand data-[state=active]:text-brand-foreground data-[state=active]:shadow-glow"
+            >
+              <Store className="h-4 w-4" /> Pontos
+              <Badge variant="secondary" className="ml-1">
+                {stores.length}
+              </Badge>
+            </TabsTrigger>
+            <TabsTrigger
               value="screens"
-              className="gap-2 rounded-lg px-4 data-[state=active]:gradient-brand data-[state=active]:text-brand-foreground data-[state=active]:shadow-glow"
+              className="shrink-0 gap-2 rounded-lg px-4 data-[state=active]:gradient-brand data-[state=active]:text-brand-foreground data-[state=active]:shadow-glow"
             >
               <Tv className="h-4 w-4" /> TVs
               <Badge variant="secondary" className="ml-1">
@@ -200,51 +267,69 @@ function Dashboard() {
               </Badge>
             </TabsTrigger>
             <TabsTrigger
-              value="ads"
-              className="gap-2 rounded-lg px-4 data-[state=active]:gradient-brand data-[state=active]:text-brand-foreground data-[state=active]:shadow-glow"
+              value="companies"
+              className="shrink-0 gap-2 rounded-lg px-4 data-[state=active]:gradient-brand data-[state=active]:text-brand-foreground data-[state=active]:shadow-glow"
             >
-              <Megaphone className="h-4 w-4" /> Anúncios
+              <Building2 className="h-4 w-4" /> Empresas
               <Badge variant="secondary" className="ml-1">
-                {ads.length}
+                {companies.length}
               </Badge>
             </TabsTrigger>
           </TabsList>
 
           <TabsContent value="overview">
-            <Overview screens={screens} ads={supportedAds} />
+            <Overview
+              screens={screens}
+              ads={supportedAds}
+              stores={stores}
+              companies={companies}
+              tvDevices={tvDevices}
+              tvStats={tvStats}
+            />
+          </TabsContent>
+
+          <TabsContent value="stores">
+            <PointsTab
+              stores={stores}
+              categories={categories}
+              screens={screens}
+              qc={qc}
+              loading={storesQ.isLoading}
+            />
           </TabsContent>
 
           <TabsContent value="screens">
             <ScreensTab
               screens={screens}
+              stores={stores}
+              companies={companies}
+              companyScreens={companyScreens}
               tvDevices={tvDevices}
               qc={qc}
               loading={screensQ.isLoading}
             />
           </TabsContent>
 
-          <TabsContent value="ads">
-            <AdsTab
-              ads={supportedAds}
+          <TabsContent value="companies">
+            <CompaniesTab
+              companies={companies}
+              categories={categories}
               screens={screens}
+              companyScreens={companyScreens}
+              ads={supportedAds}
               qc={qc}
-              loading={adsQ.isLoading}
+              loading={companiesQ.isLoading}
+              billingFilter={billingFilter}
+              onBillingFilterChange={setBillingFilter}
             />
           </TabsContent>
         </Tabs>
+
+        {isMobile ? (
+          <MobileBottomNav value={activeTab} onChange={setActiveTab} />
+        ) : null}
       </main>
     </div>
-  );
-}
-
-// ---------- Brand ----------
-function BrandLogo({ className = "h-9 w-9" }: { className?: string }) {
-  return (
-    <img
-      src="/logo.svg"
-      alt="Midia Indoor"
-      className={`rounded-xl object-cover shadow-glow ${className}`}
-    />
   );
 }
 
@@ -252,31 +337,50 @@ function BrandLogo({ className = "h-9 w-9" }: { className?: string }) {
 function TopBar() {
   const router = useRouter();
   const { user, signOut } = useAuth();
+  const { resolvedTheme, toggleTheme } = useTheme();
+  const isMobile = useIsMobile();
 
   return (
     <header className="sticky top-0 z-30 border-b border-border/60 bg-background/80 backdrop-blur">
       <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 md:px-8">
         <div className="flex items-center gap-3">
-          <BrandLogo />
+          <BrandLogo className={isMobile ? "h-8 w-8" : "h-9 w-9"} />
           <div className="leading-tight">
-            <div className="text-sm font-semibold tracking-tight">Midia Indoor</div>
-            <div className="text-xs text-muted-foreground">
-              Gestão de TVs & Campanhas
-            </div>
+            <div className="text-sm font-semibold tracking-tight">Up Indoor</div>
+            {!isMobile ? (
+              <div className="text-xs text-muted-foreground">
+                Mídia indoor simples para TVs, lojas e campanhas locais.
+              </div>
+            ) : null}
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <Badge
+          {!isMobile ? (
+            <Badge
+              variant="outline"
+              className={
+                supabaseEnabled
+                  ? "border-success/40 bg-success/10 text-success"
+                  : "border-warning/40 bg-warning/10 text-warning"
+              }
+            >
+              <Database className="mr-1.5 h-3 w-3" />
+              {supabaseEnabled ? "Supabase conectado" : "Modo local"}
+            </Badge>
+          ) : null}
+          <Button
+            size="icon"
             variant="outline"
-            className={
-              supabaseEnabled
-                ? "border-success/40 bg-success/10 text-success"
-                : "border-warning/40 bg-warning/10 text-warning"
-            }
+            onClick={toggleTheme}
+            aria-label="Alternar tema"
           >
-            <Database className="mr-1.5 h-3 w-3" />
-            {supabaseEnabled ? "Supabase conectado" : "Modo local"}
-          </Badge>
+            {resolvedTheme === "dark" ? (
+              <Sun className="h-4 w-4" />
+            ) : (
+              <Moon className="h-4 w-4" />
+            )}
+          </Button>
+          <PwaInstallButton />
           {user ? (
             <>
               <div className="hidden rounded-lg border border-border/60 bg-card px-3 py-1.5 text-xs text-muted-foreground md:block">
@@ -319,15 +423,17 @@ function FullScreenLoader({ text }: { text: string }) {
 
 // ---------- Hero ----------
 function HeroHeader({
-  totalScreens,
-  activeScreens,
+  tvStats,
   totalAds,
   activeAds,
+  totalStores,
+  totalCompanies,
 }: {
-  totalScreens: number;
-  activeScreens: number;
+  tvStats: ReturnType<typeof summarizeTvStatuses>;
   totalAds: number;
   activeAds: number;
+  totalStores: number;
+  totalCompanies: number;
 }) {
   return (
     <section className="relative overflow-hidden rounded-3xl border border-border bg-card p-8 shadow-card md:p-10">
@@ -346,16 +452,26 @@ function HeroHeader({
             </span>
           </h1>
           <p className="mt-3 text-sm text-muted-foreground md:text-base">
-            Cadastre telas, publique anúncios com imagem ou vídeo e abra o player
-            em qualquer TV da sua rede.
+            Status em tempo real das TVs, campanhas e pontos da sua rede.
           </p>
         </div>
         <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-          <Stat label="TVs" value={totalScreens} icon={<Tv className="h-4 w-4" />} />
+          <Stat label="TVs" value={tvStats.total} icon={<Tv className="h-4 w-4" />} />
           <Stat
-            label="TVs ativas"
-            value={activeScreens}
-            icon={<Power className="h-4 w-4 text-success" />}
+            label="Online"
+            value={tvStats.online}
+            icon={<Radio className="h-4 w-4 text-success" />}
+          />
+          <Stat
+            label="Offline"
+            value={tvStats.offline}
+            icon={<Power className="h-4 w-4 text-destructive" />}
+          />
+          <Stat
+            label="Habilitadas"
+            value={tvStats.enabled}
+            icon={<Power className="h-4 w-4 text-[color:var(--brand-glow)]" />}
+            hint="Podem exibir anúncios"
           />
           <Stat
             label="Anúncios"
@@ -367,6 +483,16 @@ function HeroHeader({
             value={activeAds}
             icon={<Radio className="h-4 w-4 text-[color:var(--brand-glow)]" />}
           />
+          <Stat
+            label="Pontos"
+            value={totalStores}
+            icon={<Store className="h-4 w-4" />}
+          />
+          <Stat
+            label="Empresas"
+            value={totalCompanies}
+            icon={<Building2 className="h-4 w-4" />}
+          />
         </div>
       </div>
     </section>
@@ -377,10 +503,12 @@ function Stat({
   label,
   value,
   icon,
+  hint,
 }: {
   label: string;
   value: number;
   icon: React.ReactNode;
+  hint?: string;
 }) {
   return (
     <div className="rounded-2xl border border-border/60 bg-background/40 p-4">
@@ -389,13 +517,30 @@ function Stat({
         {icon}
       </div>
       <div className="mt-2 text-2xl font-bold">{value}</div>
+      {hint ? <p className="mt-1 text-[10px] text-muted-foreground">{hint}</p> : null}
     </div>
   );
 }
 
 // ---------- Overview ----------
-function Overview({ screens, ads }: { screens: Screen[]; ads: Ad[] }) {
-  const recentAds = ads.slice(0, 5);
+function Overview({
+  screens,
+  ads,
+  stores,
+  companies,
+  tvDevices,
+  tvStats,
+}: {
+  screens: Screen[];
+  ads: Ad[];
+  stores: StoreType[];
+  companies: Company[];
+  tvDevices: TvDevice[];
+  tvStats: ReturnType<typeof summarizeTvStatuses>;
+}) {
+  const adsPagination = usePaginatedItems(ads, 5, `ads-${ads.length}`);
+  const screensPagination = usePaginatedItems(screens, 6, `screens-${screens.length}`);
+
   return (
     <div className="grid gap-6 lg:grid-cols-3">
       <Card className="lg:col-span-2">
@@ -405,18 +550,29 @@ function Overview({ screens, ads }: { screens: Screen[]; ads: Ad[] }) {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          {recentAds.length === 0 ? (
+          {ads.length === 0 ? (
             <EmptyState
               icon={<Megaphone className="h-8 w-8" />}
               title="Nenhuma campanha ainda"
-              description="Crie seu primeiro anúncio na aba Anúncios."
+              description="Crie campanhas dentro de cada empresa."
             />
           ) : (
-            <ul className="divide-y divide-border">
-              {recentAds.map((a) => (
-                <RecentAdItem key={a.id} ad={a} />
-              ))}
-            </ul>
+            <>
+              <ul className="divide-y divide-border">
+                {adsPagination.paginatedItems.map((ad) => (
+                  <RecentAdItem key={ad.id} ad={ad} />
+                ))}
+              </ul>
+              <ListPagination
+                className="mt-4"
+                page={adsPagination.page}
+                totalPages={adsPagination.totalPages}
+                totalItems={adsPagination.totalItems}
+                rangeStart={adsPagination.rangeStart}
+                rangeEnd={adsPagination.rangeEnd}
+                onPageChange={adsPagination.setPage}
+              />
+            </>
           )}
         </CardContent>
       </Card>
@@ -424,7 +580,49 @@ function Overview({ screens, ads }: { screens: Screen[]; ads: Ad[] }) {
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
-            <Tv className="h-4 w-4" /> TVs cadastradas
+            <Store className="h-4 w-4" /> Resumo operacional
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3 text-sm">
+          <div className="flex items-center justify-between rounded-lg border border-border/60 px-3 py-2">
+            <span className="text-muted-foreground">Pontos</span>
+            <span className="font-semibold">{stores.length}</span>
+          </div>
+          <div className="flex items-center justify-between rounded-lg border border-border/60 px-3 py-2">
+            <span className="text-muted-foreground">Empresas</span>
+            <span className="font-semibold">{companies.length}</span>
+          </div>
+          <div className="flex items-center justify-between rounded-lg border border-border/60 px-3 py-2">
+            <span className="text-muted-foreground">TVs cadastradas</span>
+            <span className="font-semibold">{tvStats.total}</span>
+          </div>
+          <div className="flex items-center justify-between rounded-lg border border-success/30 bg-success/5 px-3 py-2">
+            <span className="text-muted-foreground">TVs online</span>
+            <span className="font-semibold text-success">{tvStats.online}</span>
+          </div>
+          <div className="flex items-center justify-between rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2">
+            <span className="text-muted-foreground">TVs offline</span>
+            <span className="font-semibold text-destructive">{tvStats.offline}</span>
+          </div>
+          <div className="flex items-center justify-between rounded-lg border border-border/60 px-3 py-2">
+            <span className="text-muted-foreground">TVs habilitadas</span>
+            <span className="font-semibold">{tvStats.enabled}</span>
+          </div>
+          <div className="flex items-center justify-between rounded-lg border border-border/60 px-3 py-2">
+            <span className="text-muted-foreground">Campanhas</span>
+            <span className="font-semibold">{ads.length}</span>
+          </div>
+          <div className="flex items-center justify-between rounded-lg border border-border/60 px-3 py-2">
+            <span className="text-muted-foreground">Sem app pareado</span>
+            <span className="font-semibold">{tvStats.unpaired}</span>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card className="lg:col-span-3">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Tv className="h-4 w-4" /> Status das TVs
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -435,22 +633,45 @@ function Overview({ screens, ads }: { screens: Screen[]; ads: Ad[] }) {
               description="Adicione uma TV para começar."
             />
           ) : (
-            screens.slice(0, 6).map((s) => (
-              <div
-                key={s.id}
-                className="flex items-center justify-between rounded-lg border border-border/60 bg-background/40 px-3 py-2"
-              >
-                <div className="min-w-0">
-                  <div className="truncate text-sm font-medium">{s.name}</div>
-                  <div className="truncate text-xs text-muted-foreground">
-                    {s.location || "Sem local"}
+            <>
+              {screensPagination.paginatedItems.map((screen) => {
+                const connection = getTvConnectionState(
+                  getPrimaryTvDevice(screen.id, tvDevices),
+                );
+                return (
+                  <div
+                    key={screen.id}
+                    className="flex items-center justify-between gap-3 rounded-lg border border-border/60 bg-background/40 px-3 py-2"
+                  >
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={`h-2 w-2 shrink-0 rounded-full ${getConnectionDotClass(connection.label, screen.active)}`}
+                        />
+                        <div className="truncate text-sm font-medium">{screen.name}</div>
+                      </div>
+                      <div className="mt-1 truncate text-xs text-muted-foreground">
+                        {connection.detail}
+                      </div>
+                    </div>
+                    <div className="flex shrink-0 flex-col items-end gap-1">
+                      <Badge className={connection.className}>{connection.label}</Badge>
+                      <span className="text-[10px] text-muted-foreground">
+                        {screen.active ? "Habilitada" : "Desabilitada"}
+                      </span>
+                    </div>
                   </div>
-                </div>
-                <span
-                  className={`h-2 w-2 rounded-full ${s.active ? "bg-success" : "bg-muted-foreground/40"}`}
-                />
-              </div>
-            ))
+                );
+              })}
+              <ListPagination
+                page={screensPagination.page}
+                totalPages={screensPagination.totalPages}
+                totalItems={screensPagination.totalItems}
+                rangeStart={screensPagination.rangeStart}
+                rangeEnd={screensPagination.rangeEnd}
+                onPageChange={screensPagination.setPage}
+              />
+            </>
           )}
         </CardContent>
       </Card>
@@ -564,78 +785,6 @@ function ScreenDisplayPreview({
   );
 }
 
-function getPrimaryTvDevice(screenId: string, tvDevices: TvDevice[]) {
-  return [...tvDevices]
-    .filter((device) => device.screen_id === screenId)
-    .sort((left, right) => {
-      const rightTime = new Date(right.last_seen_at ?? right.created_at).getTime();
-      const leftTime = new Date(left.last_seen_at ?? left.created_at).getTime();
-      return rightTime - leftTime;
-    })[0];
-}
-
-function getTvConnectionState(device?: TvDevice) {
-  if (!device) {
-    return {
-      label: "Sem app",
-      detail: "Nenhum dispositivo pareado",
-      className: "border-muted-foreground/30 bg-muted/40 text-muted-foreground",
-    };
-  }
-
-  if (device.status === "pending") {
-    return {
-      label: "Pendente",
-      detail: "Dispositivo criado, aguardando pareamento",
-      className: "border-muted-foreground/30 bg-muted/40 text-muted-foreground",
-    };
-  }
-
-  if (device.last_seen_at) {
-    const elapsed = Date.now() - new Date(device.last_seen_at).getTime();
-
-    if (device.status === "idle" && elapsed <= TV_BACKGROUND_WINDOW_MS) {
-      return {
-        label: "App fechado",
-        detail: `TV saiu do app ${formatRelativeTime(device.last_seen_at)}`,
-        className: "border-warning/40 bg-warning/10 text-warning",
-      };
-    }
-
-    if (elapsed <= TV_ONLINE_WINDOW_MS) {
-      return {
-        label: "Online",
-        detail: `App ativa ${formatRelativeTime(device.last_seen_at)}`,
-        className: "border-success/40 bg-success/10 text-success",
-      };
-    }
-  }
-
-  return {
-    label: "Offline",
-    detail: device.last_seen_at
-      ? `Sem sinal ${formatRelativeTime(device.last_seen_at)}`
-      : "Pareada, mas sem sinal do app",
-    className: "border-destructive/40 bg-destructive/10 text-destructive",
-  };
-}
-
-function formatRelativeTime(value: string) {
-  const diffMs = Math.max(0, Date.now() - new Date(value).getTime());
-  const diffSeconds = Math.floor(diffMs / 1000);
-
-  if (diffSeconds < 60) return `${diffSeconds}s atrás`;
-
-  const diffMinutes = Math.floor(diffSeconds / 60);
-  if (diffMinutes < 60) return `${diffMinutes} min atrás`;
-
-  const diffHours = Math.floor(diffMinutes / 60);
-  if (diffHours < 24) return `${diffHours} h atrás`;
-
-  const diffDays = Math.floor(diffHours / 24);
-  return `${diffDays} d atrás`;
-}
-
 function createEmptyRegion(): LayoutRegionInput {
   return {
     name: "Nova região",
@@ -681,11 +830,17 @@ function createBannerRegionItem() {
 // ---------- Screens tab ----------
 function ScreensTab({
   screens,
+  stores,
+  companies,
+  companyScreens,
   tvDevices,
   qc,
   loading,
 }: {
   screens: Screen[];
+  stores: StoreType[];
+  companies: Company[];
+  companyScreens: CompanyScreen[];
   tvDevices: TvDevice[];
   qc: ReturnType<typeof useQueryClient>;
   loading: boolean;
@@ -693,6 +848,48 @@ function ScreensTab({
   const [openCreate, setOpenCreate] = useState(false);
   const [editing, setEditing] = useState<Screen | null>(null);
   const [deleting, setDeleting] = useState<Screen | null>(null);
+  const [pairingScreen, setPairingScreen] = useState<Screen | null>(null);
+  const [search, setSearch] = useState("");
+  const [storeFilter, setStoreFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState<"all" | "active" | "inactive">("all");
+  const isMobile = useIsMobile();
+
+  const filteredScreens = useMemo(() => {
+    const query = normalizeSearch(search);
+    return screens.filter((screen) => {
+      if (storeFilter !== "all" && screen.store_id !== storeFilter) return false;
+      if (statusFilter === "active" && !screen.active) return false;
+      if (statusFilter === "inactive" && screen.active) return false;
+      if (!query) return true;
+      const storeName =
+        stores.find((store) => store.id === screen.store_id)?.name ?? "";
+      const haystack = [screen.name, screen.location, screen.id, storeName]
+        .join(" ")
+        .toLowerCase();
+      return haystack.includes(query);
+    });
+  }, [screens, search, statusFilter, storeFilter, stores]);
+
+  const screensPagination = usePaginatedItems(
+    filteredScreens,
+    DEFAULT_PAGE_SIZE,
+    `${search}|${storeFilter}|${statusFilter}`,
+  );
+
+  const pairMut = useMutation({
+    mutationFn: ({ screenId, qrPayload }: { screenId: string; qrPayload: string }) =>
+      pairTvDevice({ screenId, qrPayload }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["tvDevices"] });
+      toast.success("TV pareada com sucesso");
+      setPairingScreen(null);
+    },
+    onError: (error: Error) => {
+      const message = error.message.toLowerCase();
+      if (message.includes("pairing token is invalid")) return;
+      toast.error(error.message);
+    },
+  });
 
   const delMut = useMutation({
     mutationFn: (id: string) => deleteScreen(id),
@@ -738,13 +935,61 @@ function ScreensTab({
     <div>
       <SectionHeader
         title="Suas TVs"
-        description="Cada TV tem seu próprio link de player."
+        description="Cada TV deve estar vinculada a um ponto físico."
         action={
-          <Button onClick={() => setOpenCreate(true)} className="gradient-brand text-brand-foreground shadow-glow">
+          <Button
+            onClick={() => setOpenCreate(true)}
+            disabled={stores.length === 0}
+            className="gradient-brand text-brand-foreground shadow-glow"
+          >
             <Plus /> Nova TV
           </Button>
         }
       />
+
+      {stores.length === 0 ? (
+        <div className="mb-4 rounded-xl border border-warning/40 bg-warning/10 px-4 py-3 text-sm text-warning">
+          Cadastre pelo menos um ponto antes de criar TVs.
+        </div>
+      ) : null}
+
+      {screens.length > 0 ? (
+        <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
+          <SearchField
+            value={search}
+            onChange={setSearch}
+            placeholder="Buscar TV, local ou screen ID..."
+          />
+          <Select value={storeFilter} onValueChange={setStoreFilter}>
+            <SelectTrigger className="w-full sm:w-[200px]">
+              <SelectValue placeholder="Ponto" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Todos os pontos</SelectItem>
+              {stores.map((store) => (
+                <SelectItem key={store.id} value={store.id}>
+                  {store.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select
+            value={statusFilter}
+            onValueChange={(value) =>
+              setStatusFilter(value as "all" | "active" | "inactive")
+            }
+          >
+            <SelectTrigger className="w-full sm:w-[160px]">
+              <SelectValue placeholder="Status" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Todas</SelectItem>
+              <SelectItem value="active">Ativas</SelectItem>
+              <SelectItem value="inactive">Inativas</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      ) : null}
 
       {loading ? (
         <SkeletonGrid />
@@ -754,37 +999,65 @@ function ScreensTab({
           title="Cadastre sua primeira TV"
           description="Depois basta abrir o link do player na TV correspondente."
           action={
-            <Button onClick={() => setOpenCreate(true)} className="gradient-brand text-brand-foreground">
+            <Button
+              onClick={() => setOpenCreate(true)}
+              disabled={stores.length === 0}
+              className="gradient-brand text-brand-foreground"
+            >
               <Plus /> Nova TV
             </Button>
           }
         />
+      ) : filteredScreens.length === 0 ? (
+        <div className="rounded-2xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
+          Nenhuma TV encontrada com os filtros atuais.
+        </div>
       ) : (
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {screens.map((s) => (
-            <ScreenCard
-              key={s.id}
-              screen={s}
-              tvDevice={getPrimaryTvDevice(s.id, tvDevices)}
-              onEdit={() => setEditing(s)}
-              onDelete={() => setDeleting(s)}
-              onToggle={() => toggleMut.mutate(s)}
-              onRefresh={() => refreshMut.mutate(s.id)}
-              onDisplayModeChange={(displayMode) =>
-                displayModeMut.mutate({ screenId: s.id, displayMode })
-              }
-            />
-          ))}
+        <div className="space-y-4">
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+            {screensPagination.paginatedItems.map((s) => (
+              <ScreenCard
+                key={s.id}
+                screen={s}
+                store={stores.find((store) => store.id === s.store_id)}
+                tvDevice={getPrimaryTvDevice(s.id, tvDevices)}
+                onEdit={() => setEditing(s)}
+                onDelete={() => setDeleting(s)}
+                onToggle={() => toggleMut.mutate(s)}
+                onRefresh={() => refreshMut.mutate(s.id)}
+                onPair={() => setPairingScreen(s)}
+                onDisplayModeChange={(displayMode) =>
+                  displayModeMut.mutate({ screenId: s.id, displayMode })
+                }
+              />
+            ))}
+          </div>
+          <ListPagination
+            page={screensPagination.page}
+            totalPages={screensPagination.totalPages}
+            totalItems={screensPagination.totalItems}
+            rangeStart={screensPagination.rangeStart}
+            rangeEnd={screensPagination.rangeEnd}
+            onPageChange={screensPagination.setPage}
+          />
         </div>
       )}
 
       <ScreenFormDialog
         open={openCreate}
         onOpenChange={setOpenCreate}
-        onSubmit={async (values) => {
+        stores={stores}
+        companies={companies}
+        companyScreens={companyScreens}
+        onSubmit={async (values, companyIds) => {
           try {
-            await createScreen(values);
+            const created = await createScreen(values);
+            if (companyIds.length > 0) {
+              await syncScreenCompanies(created.id, companyIds);
+              await touchScreenPlaylist(created.id);
+            }
             qc.invalidateQueries({ queryKey: ["screens"] });
+            qc.invalidateQueries({ queryKey: ["companyScreens"] });
             toast.success("TV criada");
             setOpenCreate(false);
           } catch (e) {
@@ -795,8 +1068,11 @@ function ScreensTab({
       <ScreenFormDialog
         open={!!editing}
         onOpenChange={(o) => !o && setEditing(null)}
+        stores={stores}
+        companies={companies}
+        companyScreens={companyScreens}
         initial={editing ?? undefined}
-        onSubmit={async (values) => {
+        onSubmit={async (values, companyIds) => {
           if (!editing) return;
           try {
             await updateScreen(editing.id, {
@@ -808,8 +1084,12 @@ function ScreensTab({
               resolution_width: values.resolution_width,
               resolution_height: values.resolution_height,
               layout_template_id: null,
+              store_id: values.store_id ?? null,
             });
+            await syncScreenCompanies(editing.id, companyIds);
+            await touchScreenPlaylist(editing.id);
             qc.invalidateQueries({ queryKey: ["screens"] });
+            qc.invalidateQueries({ queryKey: ["companyScreens"] });
             toast.success("TV atualizada");
             setEditing(null);
           } catch (e) {
@@ -817,6 +1097,27 @@ function ScreensTab({
           }
         }}
       />
+      <Dialog open={!!pairingScreen} onOpenChange={(open) => !open && setPairingScreen(null)}>
+        <DialogContent className={isMobile ? "h-[100dvh] max-h-[100dvh] w-full max-w-none rounded-none border-0" : "sm:max-w-lg"}>
+          <DialogHeader>
+            <DialogTitle>Parear dispositivo</DialogTitle>
+            <DialogDescription>
+              Escaneie o QR exibido na TV {pairingScreen ? `"${pairingScreen.name}"` : ""}.
+            </DialogDescription>
+          </DialogHeader>
+          {pairingScreen ? (
+            <QrPairingScanner
+              key={pairingScreen.id}
+              disabled={pairMut.isPending}
+              onScan={(qrPayload) => {
+                if (pairMut.isPending) return;
+                pairMut.mutate({ screenId: pairingScreen.id, qrPayload });
+              }}
+              onClose={() => setPairingScreen(null)}
+            />
+          ) : null}
+        </DialogContent>
+      </Dialog>
       <ConfirmDialog
         open={!!deleting}
         onOpenChange={(o) => !o && setDeleting(null)}
@@ -831,19 +1132,23 @@ function ScreensTab({
 
 function ScreenCard({
   screen,
+  store,
   tvDevice,
   onEdit,
   onDelete,
   onToggle,
   onRefresh,
+  onPair,
   onDisplayModeChange,
 }: {
   screen: Screen;
+  store?: StoreType;
   tvDevice?: TvDevice;
   onEdit: () => void;
   onDelete: () => void;
   onToggle: () => void;
   onRefresh: () => void;
+  onPair: () => void;
   onDisplayModeChange: (displayMode: ScreenDisplayMode) => void;
 }) {
   const playerUrl =
@@ -859,12 +1164,12 @@ function ScreenCard({
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <span
-              className={`h-2 w-2 rounded-full ${screen.active ? "bg-success shadow-[0_0_10px_var(--success)]" : "bg-muted-foreground/40"}`}
+              className={`h-2 w-2 rounded-full ${getConnectionDotClass(connectionState.label, screen.active)}`}
             />
             <h3 className="truncate text-base font-semibold">{screen.name}</h3>
           </div>
           <p className="mt-1 truncate text-sm text-muted-foreground">
-            {screen.location || "Sem local"}
+            {store?.name || screen.location || "Sem local"}
           </p>
           <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
             <span className="text-muted-foreground">Screen ID:</span>
@@ -913,6 +1218,14 @@ function ScreenCard({
       <Separator className="my-4" />
 
       <div className="flex flex-wrap gap-2">
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={onPair}
+          disabled={!supabaseEnabled}
+        >
+          <QrCode /> Parear dispositivo
+        </Button>
         <Button asChild size="sm" className="gradient-brand text-brand-foreground">
           <Link to="/player/$screenId" params={{ screenId: screen.id }} target="_blank">
             <Play /> Abrir player
@@ -939,683 +1252,6 @@ function ScreenCard({
         </Button>
       </div>
     </div>
-  );
-}
-
-function ScreenFormDialog({
-  open,
-  onOpenChange,
-  onSubmit,
-  initial,
-}: {
-  open: boolean;
-  onOpenChange: (o: boolean) => void;
-  onSubmit: (v: ScreenInput) => void;
-  initial?: Screen;
-}) {
-  const [name, setName] = useState(initial?.name ?? "");
-  const [location, setLocation] = useState(initial?.location ?? "");
-  const [id, setId] = useState(initial?.id ?? "");
-  const [active, setActive] = useState(initial?.active ?? true);
-  const [orientation, setOrientation] = useState<Orientation>(
-    initial?.orientation ?? "landscape",
-  );
-  const [displayMode, setDisplayMode] = useState<ScreenDisplayMode>(
-    initial?.display_mode ?? "normal",
-  );
-  const [resolutionWidth, setResolutionWidth] = useState(
-    initial?.resolution_width ?? 1920,
-  );
-  const [resolutionHeight, setResolutionHeight] = useState(
-    initial?.resolution_height ?? 1080,
-  );
-
-  // reset when opening
-  useEffect(() => {
-    if (open) {
-      setName(initial?.name ?? "");
-      setLocation(initial?.location ?? "");
-      setId(initial?.id ?? "");
-      setActive(initial?.active ?? true);
-      setOrientation(initial?.orientation ?? "landscape");
-      setDisplayMode(initial?.display_mode ?? "normal");
-      setResolutionWidth(initial?.resolution_width ?? 1920);
-      setResolutionHeight(initial?.resolution_height ?? 1080);
-    }
-  }, [open, initial]);
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>{initial ? "Editar TV" : "Nova TV"}</DialogTitle>
-          <DialogDescription>
-            Configure os dados da TV. O Screen ID e usado na ativacao do app da TV e no link do player.
-          </DialogDescription>
-        </DialogHeader>
-        <div className="space-y-4">
-          <div>
-            <Label>Nome</Label>
-            <Input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="TV Recepção"
-            />
-          </div>
-          <div>
-            <Label>Local</Label>
-            <Input
-              value={location}
-              onChange={(e) => setLocation(e.target.value)}
-              placeholder="Academia — Recepção"
-            />
-          </div>
-          {initial ? (
-            <div>
-              <Label>Screen ID</Label>
-              <Input value={initial.id} readOnly />
-              <p className="mt-1 text-xs text-muted-foreground">
-                Use este valor na tela de ativacao do app da TV.
-              </p>
-            </div>
-          ) : null}
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div>
-              <Label>Orientação</Label>
-              <Select
-                value={orientation}
-                onValueChange={(value) => setOrientation(value as Orientation)}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="landscape">Horizontal</SelectItem>
-                  <SelectItem value="portrait">Vertical</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Label>Modo de exibição</Label>
-              <p className="mb-2 text-xs text-muted-foreground">
-                Teste rápido para ver como o conteúdo deve aparecer na TV.
-              </p>
-              <DisplayModeButtons value={displayMode} onChange={setDisplayMode} />
-            </div>
-          </div>
-          <div>
-            <Label className="mb-2 block">Preview</Label>
-            <ScreenDisplayPreview
-              orientation={orientation}
-              displayMode={displayMode}
-              className="aspect-video"
-            />
-          </div>
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div>
-              <Label>Resolução largura</Label>
-              <Input
-                type="number"
-                min={1}
-                value={resolutionWidth}
-                onChange={(e) => setResolutionWidth(Number(e.target.value))}
-              />
-            </div>
-            <div>
-              <Label>Resolução altura</Label>
-              <Input
-                type="number"
-                min={1}
-                value={resolutionHeight}
-                onChange={(e) => setResolutionHeight(Number(e.target.value))}
-              />
-            </div>
-          </div>
-          {!initial && (
-            <div>
-              <Label>Screen ID (opcional)</Label>
-              <Input
-                value={id}
-                onChange={(e) => setId(e.target.value)}
-                placeholder="tv-recepcao"
-              />
-              <p className="mt-1 text-xs text-muted-foreground">
-                Deixe em branco para gerar automaticamente a partir do nome.
-              </p>
-            </div>
-          )}
-          <div className="flex items-center justify-between rounded-lg border border-border/60 p-3">
-            <div>
-              <Label className="text-sm">Ativa</Label>
-              <p className="text-xs text-muted-foreground">
-                TVs inativas não exibem anúncios.
-              </p>
-            </div>
-            <Switch checked={active} onCheckedChange={setActive} />
-          </div>
-        </div>
-        <DialogFooter>
-          <Button variant="ghost" onClick={() => onOpenChange(false)}>
-            Cancelar
-          </Button>
-          <Button
-            className="gradient-brand text-brand-foreground"
-            onClick={() =>
-              onSubmit({
-                name,
-                location,
-                active,
-                orientation,
-                display_mode: displayMode,
-                resolution_width: resolutionWidth,
-                resolution_height: resolutionHeight,
-                layout_template_id: null,
-                id: id || undefined,
-              })
-            }
-          >
-            {initial ? "Salvar" : "Criar TV"}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-// ---------- Ads tab ----------
-function AdsTab({
-  ads,
-  screens,
-  qc,
-  loading,
-}: {
-  ads: Ad[];
-  screens: Screen[];
-  qc: ReturnType<typeof useQueryClient>;
-  loading: boolean;
-}) {
-  const [openCreate, setOpenCreate] = useState(false);
-  const [editing, setEditing] = useState<Ad | null>(null);
-  const [deleting, setDeleting] = useState<Ad | null>(null);
-  const orderedAds = useMemo(
-    () => sortAdsForPlayback(ads.filter((ad) => ad.type === "image" || ad.type === "video")),
-    [ads],
-  );
-
-  const delMut = useMutation({
-    mutationFn: (id: string) => deleteAd(id),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["ads"] });
-      toast.success("Anúncio excluído");
-      setDeleting(null);
-    },
-  });
-  const toggleMut = useMutation({
-    mutationFn: (a: Ad) => updateAd(a.id, { active: !a.active }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["ads"] }),
-  });
-
-  const migrateMut = useMutation({
-    mutationFn: async (ad: Ad) => {
-      if (!isInlineMediaSource(ad.source)) return;
-
-      const extension = ad.type === "video" ? "mp4" : "png";
-      const uploadedSource = await uploadAdMediaDataUri(
-        ad.source,
-        `${ad.title || "anuncio"}.${extension}`,
-      );
-
-      await updateAd(ad.id, { source: uploadedSource });
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["ads"] });
-      toast.success("Mídia migrada para Storage");
-    },
-    onError: (e: Error) => toast.error(e.message),
-  });
-
-  return (
-    <div>
-      <SectionHeader
-        title="Campanhas"
-        description="Imagem ou vídeo em uma ou várias TVs."
-        action={
-          <Button
-            onClick={() => setOpenCreate(true)}
-            disabled={screens.length === 0}
-            className="gradient-brand text-brand-foreground shadow-glow"
-          >
-            <Plus /> Novo anúncio
-          </Button>
-        }
-      />
-
-      {screens.length === 0 && (
-        <div className="mb-4 rounded-xl border border-warning/40 bg-warning/10 px-4 py-3 text-sm text-warning">
-          Cadastre pelo menos uma TV antes de criar anúncios.
-        </div>
-      )}
-
-      {loading ? (
-        <SkeletonGrid />
-      ) : orderedAds.length === 0 ? (
-        <EmptyState
-          icon={<Megaphone className="h-8 w-8" />}
-          title="Nenhum anúncio criado"
-          description="Suba uma imagem ou vídeo para exibir nas TVs."
-        />
-      ) : (
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {orderedAds.map((a) => (
-            <AdCard
-              key={a.id}
-              ad={a}
-              screens={screens}
-              onEdit={() => setEditing(a)}
-              onDelete={() => setDeleting(a)}
-              onToggle={() => toggleMut.mutate(a)}
-              onMigrateInline={
-                isInlineMediaSource(a.source)
-                  ? () => migrateMut.mutate(a)
-                  : undefined
-              }
-            />
-          ))}
-        </div>
-      )}
-
-      <AdFormDialog
-        open={openCreate}
-        onOpenChange={setOpenCreate}
-        screens={screens}
-        onSubmit={async (v) => {
-          try {
-            await createAd(v);
-            qc.invalidateQueries({ queryKey: ["ads"] });
-            toast.success("Anúncio criado");
-            setOpenCreate(false);
-          } catch (e) {
-            toast.error((e as Error).message);
-          }
-        }}
-      />
-      <AdFormDialog
-        open={!!editing}
-        onOpenChange={(o) => !o && setEditing(null)}
-        screens={screens}
-        initial={editing ?? undefined}
-        onSubmit={async (v) => {
-          if (!editing) return;
-          try {
-            await updateAd(editing.id, v);
-            qc.invalidateQueries({ queryKey: ["ads"] });
-            toast.success("Anúncio atualizado");
-            setEditing(null);
-          } catch (e) {
-            toast.error((e as Error).message);
-          }
-        }}
-      />
-      <ConfirmDialog
-        open={!!deleting}
-        onOpenChange={(o) => !o && setDeleting(null)}
-        title="Excluir este anúncio?"
-        description={`"${deleting?.title}" será removido permanentemente.`}
-        confirmLabel="Excluir"
-        onConfirm={() => deleting && delMut.mutate(deleting.id)}
-      />
-    </div>
-  );
-}
-
-function AdCard({
-  ad,
-  screens,
-  onEdit,
-  onDelete,
-  onToggle,
-  onMigrateInline,
-}: {
-  ad: Ad;
-  screens: Screen[];
-  onEdit: () => void;
-  onDelete: () => void;
-  onToggle: () => void;
-  onMigrateInline?: () => void;
-}) {
-  const linked = screens.filter((s) => ad.screen_ids.includes(s.id));
-  const status = getAdPlaybackStatus(ad);
-  const statusLabel = getAdPlaybackStatusLabel(status);
-
-  return (
-    <div className="group overflow-hidden rounded-2xl border border-border bg-card shadow-card transition hover:border-[color:var(--brand)]/40">
-      <div className="relative aspect-video overflow-hidden bg-muted">
-        <MediaThumb ad={ad} className="h-full w-full" />
-        <Badge
-          className="absolute left-3 top-3 backdrop-blur"
-          variant={status === "live" ? "default" : status === "paused" ? "secondary" : "outline"}
-        >
-          {statusLabel}
-        </Badge>
-        <Badge variant="outline" className="absolute right-3 top-3 border-white/30 bg-black/40 text-white backdrop-blur">
-          {ad.type === "video" ? "Vídeo" : "Imagem"}
-        </Badge>
-      </div>
-      <div className="p-4">
-        <h3 className="truncate text-base font-semibold">{ad.title}</h3>
-        <p className="truncate text-xs text-muted-foreground">
-          {ad.advertiser || "Sem anunciante"}
-        </p>
-        <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-          <span className="inline-flex items-center gap-1">
-            <Tv className="h-3 w-3" /> {getOrientationLabel(ad.preferred_orientation)}
-          </span>
-          <span>·</span>
-          <span className="inline-flex items-center gap-1">
-            <Play className="h-3 w-3" /> Ordem #{ad.position}
-          </span>
-          <span>·</span>
-          <span className="inline-flex items-center gap-1">
-            <Clock className="h-3 w-3" /> {ad.duration}s
-          </span>
-          <span>·</span>
-          <span>{linked.length} TV(s)</span>
-        </div>
-        {status !== "live" ? (
-          <p className="mt-2 text-xs text-muted-foreground">
-            {getPlaybackScheduleMessage(ad, status)}
-          </p>
-        ) : null}
-        {linked.length > 0 && (
-          <div className="mt-2 flex flex-wrap gap-1">
-            {linked.slice(0, 3).map((s) => (
-              <Badge key={s.id} variant="outline" className="text-[10px]">
-                {s.name}
-              </Badge>
-            ))}
-            {linked.length > 3 && (
-              <Badge variant="outline" className="text-[10px]">
-                +{linked.length - 3}
-              </Badge>
-            )}
-          </div>
-        )}
-        <Separator className="my-4" />
-        <div className="flex items-center justify-between">
-          <Switch checked={ad.active} onCheckedChange={onToggle} />
-          <div className="flex gap-1">
-            {onMigrateInline ? (
-              <Button size="sm" variant="outline" onClick={onMigrateInline}>
-                <RefreshCw /> Migrar mídia
-              </Button>
-            ) : null}
-            <Button size="sm" variant="ghost" onClick={onEdit}>
-              <Pencil /> Editar
-            </Button>
-            <Button
-              size="icon"
-              variant="ghost"
-              className="text-destructive hover:text-destructive"
-              onClick={onDelete}
-            >
-              <Trash2 />
-            </Button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function AdFormDialog({
-  open,
-  onOpenChange,
-  screens,
-  onSubmit,
-  initial,
-}: {
-  open: boolean;
-  onOpenChange: (o: boolean) => void;
-  screens: Screen[];
-  onSubmit: (v: AdInput) => void;
-  initial?: Ad;
-}) {
-  const [title, setTitle] = useState("");
-  const [advertiser, setAdvertiser] = useState("");
-  const [type, setType] = useState<MediaType>("image");
-  const [preferredOrientation, setPreferredOrientation] =
-    useState<AdOrientation>("any");
-  const [source, setSource] = useState("");
-  const [duration, setDuration] = useState(10);
-  const [selected, setSelected] = useState<string[]>([]);
-  const [active, setActive] = useState(true);
-  const [startsAt, setStartsAt] = useState("");
-  const [endsAt, setEndsAt] = useState("");
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [submitting, setSubmitting] = useState(false);
-
-  useEffect(() => {
-    if (open) {
-      setTitle(initial?.title ?? "");
-      setAdvertiser(initial?.advertiser ?? "");
-      setType(initial?.type === "video" ? "video" : "image");
-      setPreferredOrientation(initial?.preferred_orientation ?? "any");
-      setSource(initial?.source ?? "");
-      setDuration(initial?.duration ?? 10);
-      setSelected(initial?.screen_ids ?? []);
-      setActive(initial?.active ?? true);
-      setStartsAt(initial?.starts_at?.slice(0, 16) ?? "");
-      setEndsAt(initial?.ends_at?.slice(0, 16) ?? "");
-      setSelectedFile(null);
-      setSubmitting(false);
-    }
-  }, [open, initial]);
-
-  const onFile = async (file: File | null) => {
-    if (!file) return;
-    setSelectedFile(file);
-    const reader = new FileReader();
-    reader.onload = () => setSource(String(reader.result || ""));
-    reader.readAsDataURL(file);
-    if (file.type.startsWith("video")) setType("video");
-    else if (file.type.startsWith("image")) setType("image");
-  };
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
-        <DialogHeader>
-          <DialogTitle>{initial ? "Editar anúncio" : "Novo anúncio"}</DialogTitle>
-          <DialogDescription>
-            Escolha o tipo de mídia, o tempo em tela e as TVs onde vai aparecer.
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="grid gap-4 md:grid-cols-2">
-          <div>
-            <Label>Título</Label>
-            <Input value={title} onChange={(e) => setTitle(e.target.value)} />
-          </div>
-          <div>
-            <Label>Anunciante</Label>
-            <Input
-              value={advertiser}
-              onChange={(e) => setAdvertiser(e.target.value)}
-            />
-          </div>
-          <div>
-            <Label>Tipo de mídia</Label>
-            <Select value={type} onValueChange={(v) => setType(v as MediaType)}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="image">Imagem</SelectItem>
-                <SelectItem value="video">Vídeo</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <div>
-            <Label>Duração (segundos)</Label>
-            <Input
-              type="number"
-              min={3}
-              value={duration}
-              onChange={(e) => setDuration(Number(e.target.value))}
-            />
-          </div>
-          <div>
-            <Label>Orientação preferida</Label>
-            <Select
-              value={preferredOrientation}
-              onValueChange={(value) =>
-                setPreferredOrientation(value as AdOrientation)
-              }
-            >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="any">Qualquer</SelectItem>
-                <SelectItem value="landscape">Horizontal</SelectItem>
-                <SelectItem value="portrait">Vertical</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="md:col-span-2">
-            <Label>URL da mídia</Label>
-            <Textarea
-              value={source}
-              onChange={(e) => setSource(e.target.value)}
-              placeholder="https://exemplo.com/banner.jpg"
-              rows={2}
-            />
-          </div>
-          <div className="md:col-span-2">
-            <Label>Ou envie um arquivo</Label>
-            <Input
-              type="file"
-              accept={type === "video" ? "video/*" : "image/*"}
-              onChange={(e) => onFile(e.target.files?.[0] ?? null)}
-            />
-          </div>
-          <div>
-            <Label>Início (opcional)</Label>
-            <Input
-              type="datetime-local"
-              value={startsAt}
-              onChange={(e) => setStartsAt(e.target.value)}
-            />
-            <p className="mt-1 text-xs text-muted-foreground">
-              Deixe em branco para começar a exibir imediatamente.
-            </p>
-          </div>
-          <div>
-            <Label>Fim (opcional)</Label>
-            <Input
-              type="datetime-local"
-              value={endsAt}
-              onChange={(e) => setEndsAt(e.target.value)}
-            />
-            <p className="mt-1 text-xs text-muted-foreground">
-              Se preencher, o anúncio some do player após esse horário.
-            </p>
-          </div>
-        </div>
-
-        <div className="mt-4">
-          <Label className="mb-2 block">Exibir nas TVs</Label>
-          {screens.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              Cadastre uma TV primeiro.
-            </p>
-          ) : (
-            <div className="grid gap-2 rounded-lg border border-border/60 p-3 sm:grid-cols-2">
-              {screens.map((s) => (
-                <label
-                  key={s.id}
-                  className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 hover:bg-accent/50"
-                >
-                  <Checkbox
-                    checked={selected.includes(s.id)}
-                    onCheckedChange={(v) => {
-                      setSelected((cur) =>
-                        v ? [...cur, s.id] : cur.filter((x) => x !== s.id),
-                      );
-                    }}
-                  />
-                  <span className="text-sm">{s.name}</span>
-                </label>
-              ))}
-            </div>
-          )}
-        </div>
-
-        <div className="mt-4 flex items-center justify-between rounded-lg border border-border/60 p-3">
-          <div>
-            <Label className="text-sm">Ativo</Label>
-            <p className="text-xs text-muted-foreground">
-              Anúncios inativos não aparecem no player.
-            </p>
-          </div>
-          <Switch checked={active} onCheckedChange={setActive} />
-        </div>
-
-        <DialogFooter>
-          <Button variant="ghost" onClick={() => onOpenChange(false)}>
-            Cancelar
-          </Button>
-          <Button
-            className="gradient-brand text-brand-foreground"
-            disabled={!title || (!source && !selectedFile) || submitting}
-            onClick={async () => {
-              try {
-                setSubmitting(true);
-
-                let finalSource = source;
-
-                if (supabaseEnabled) {
-                  if (selectedFile) {
-                    finalSource = await uploadAdMediaFile(selectedFile);
-                  } else if (isInlineMediaSource(source)) {
-                    const extension = type === "video" ? "mp4" : "png";
-                    finalSource = await uploadAdMediaDataUri(
-                      source,
-                      `${title || "anuncio"}.${extension}`,
-                    );
-                  }
-                }
-
-                await onSubmit({
-                  title,
-                  advertiser,
-                  type,
-                  source: finalSource,
-                  duration,
-                  preferred_orientation: preferredOrientation,
-                  screen_ids: selected,
-                  active,
-                  starts_at: startsAt ? new Date(startsAt).toISOString() : null,
-                  ends_at: endsAt ? new Date(endsAt).toISOString() : null,
-                });
-              } finally {
-                setSubmitting(false);
-              }
-            }}
-          >
-            {submitting ? (
-              <>
-                <LoaderCircle className="animate-spin" /> Enviando mídia
-              </>
-            ) : initial ? (
-              "Salvar"
-            ) : (
-              "Criar anúncio"
-            )}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
   );
 }
 
@@ -2537,23 +2173,4 @@ function RecentAdItem({ ad }: { ad: Ad }) {
       </Badge>
     </li>
   );
-}
-
-function getPlaybackScheduleMessage(ad: Ad, status: ReturnType<typeof getAdPlaybackStatus>) {
-  if (status === "scheduled" && ad.starts_at) {
-    return `Inicia em ${formatScheduleDate(ad.starts_at)}.`;
-  }
-
-  if (status === "expired" && ad.ends_at) {
-    return `Encerrado em ${formatScheduleDate(ad.ends_at)}.`;
-  }
-
-  return "Este anúncio não está disponível para exibição agora.";
-}
-
-function formatScheduleDate(value: string) {
-  return new Date(value).toLocaleString("pt-BR", {
-    dateStyle: "short",
-    timeStyle: "short",
-  });
 }

@@ -31,13 +31,68 @@ export interface Screen {
   playlist_updated_at?: string;
   sound_enabled?: boolean;
   volume?: number;
+  store_id?: string | null;
 }
+
+export type BillingStatus = "active" | "overdue" | "suspended";
+
+export interface Category {
+  id: string;
+  name: string;
+  slug: string;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Store {
+  id: string;
+  name: string;
+  address: string;
+  city: string;
+  category_id: string | null;
+  active: boolean;
+  notes: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Company {
+  id: string;
+  name: string;
+  category_id: string | null;
+  contact_name: string;
+  contact_email: string;
+  contact_phone: string;
+  active: boolean;
+  notes: string;
+  billing_status: BillingStatus;
+  monthly_amount_cents: number;
+  payment_due_day: number;
+  last_payment_at: string | null;
+  next_payment_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CompanyScreen {
+  company_id: string;
+  screen_id: string;
+  created_at: string;
+}
+
+export interface StoreInput
+  extends Omit<Store, "id" | "created_at" | "updated_at"> {}
+
+export interface CompanyInput
+  extends Omit<Company, "id" | "created_at" | "updated_at"> {}
 
 export interface Ad {
   id: string;
   title: string;
   advertiser: string;
   screen_ids: string[];
+  company_id?: string | null;
   type: MediaType;
   source: string;
   duration: number;
@@ -127,6 +182,7 @@ export interface LayoutTemplateInput
 
 export interface TvDevice {
   id: string;
+  device_code?: string;
   device_name: string;
   platform: string;
   pairing_code: string | null;

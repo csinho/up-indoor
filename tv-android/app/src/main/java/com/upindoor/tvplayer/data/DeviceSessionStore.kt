@@ -1,7 +1,8 @@
-package com.upmidia.tvplayer.data
+package com.upindoor.tvplayer.data
 
 import android.content.Context
-import com.upmidia.tvplayer.model.TvDeviceSession
+import com.upindoor.tvplayer.data.BackendConfig
+import com.upindoor.tvplayer.model.TvDeviceSession
 import java.util.UUID
 
 class DeviceSessionStore(context: Context) {
@@ -20,8 +21,10 @@ class DeviceSessionStore(context: Context) {
     )
   }
 
-  fun save(screenId: String, apiBaseUrl: String?) {
-    val normalizedBaseUrl = apiBaseUrl?.trim()?.takeIf { it.isNotBlank() }
+  fun save(screenId: String, apiBaseUrl: String? = null) {
+    val normalizedBaseUrl =
+      apiBaseUrl?.trim()?.takeIf { it.isNotBlank() }
+        ?: BackendConfig.defaultBaseUrl
 
     prefs.edit()
       .putString(KEY_SCREEN_ID, screenId.trim())
