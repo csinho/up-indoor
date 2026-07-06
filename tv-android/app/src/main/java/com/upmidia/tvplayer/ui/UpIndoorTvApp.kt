@@ -25,7 +25,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -178,25 +181,28 @@ private fun ActivationScreen(
       Modifier
         .fillMaxSize()
         .background(Color(0xFF020617)),
-    contentAlignment = Alignment.TopCenter,
+    contentAlignment = Alignment.Center,
   ) {
     Card(
       colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
       shape = RoundedCornerShape(24.dp),
       modifier =
         Modifier
-          .fillMaxWidth(0.9f)
-          .padding(top = 24.dp),
+          .fillMaxWidth(0.92f)
+          .padding(horizontal = 16.dp, vertical = 12.dp),
     ) {
       Column(
-        modifier = Modifier.padding(24.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
+        modifier =
+          Modifier
+            .verticalScroll(rememberScrollState())
+            .padding(20.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
       ) {
         Image(
           painter = painterResource(R.drawable.up_indoor_mascot),
           contentDescription = "Up Indoor",
-          modifier = Modifier.height(120.dp),
+          modifier = Modifier.height(72.dp),
           contentScale = ContentScale.Fit,
         )
         Text(
@@ -205,59 +211,36 @@ private fun ActivationScreen(
           color = Color.White,
         )
         Text(
-          text = "Digite o Screen ID da TV cadastrada no dashboard e toque em ativar.",
+          text = "Informe o Screen ID do dashboard e toque em Ativar.",
           color = Color(0xFFCBD5E1),
           lineHeight = 20.sp,
         )
 
-        Card(
-          colors = CardDefaults.cardColors(containerColor = Color(0xFF111827)),
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.spacedBy(12.dp),
+          verticalAlignment = Alignment.CenterVertically,
         ) {
-          Column(modifier = Modifier.padding(16.dp)) {
-            Text(
-              text = "Codigo do dispositivo",
-              color = Color(0xFF94A3B8),
-              fontSize = 14.sp,
-            )
-            Spacer(modifier = Modifier.height(6.dp))
-            Text(
-              text = session.deviceCode,
-              color = Color.White,
-              fontSize = 24.sp,
-              fontWeight = FontWeight.Bold,
-            )
+          Card(
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF111827)),
+            modifier = Modifier.weight(1f),
+          ) {
+            Column(modifier = Modifier.padding(12.dp)) {
+              Text(
+                text = "Codigo do dispositivo",
+                color = Color(0xFF94A3B8),
+                fontSize = 13.sp,
+              )
+              Spacer(modifier = Modifier.height(4.dp))
+              Text(
+                text = session.deviceCode,
+                color = Color.White,
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Bold,
+              )
+            }
           }
-        }
 
-        OutlinedTextField(
-          value = screenId,
-          onValueChange = { screenId = it },
-          label = { Text("screenId para desenvolvimento") },
-          placeholder = { Text("Ex.: tv") },
-          singleLine = true,
-          modifier = Modifier.fillMaxWidth(),
-          colors = fieldColors,
-        )
-
-        OutlinedTextField(
-          value = apiBaseUrl,
-          onValueChange = { apiBaseUrl = it },
-          label = { Text("Base URL do backend") },
-          placeholder = { Text("https://seu-projeto.supabase.co") },
-          singleLine = true,
-          modifier = Modifier.fillMaxWidth(),
-          keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
-          colors = fieldColors,
-        )
-
-        Text(
-          text = "Use o Screen ID mostrado no dashboard. A URL pode continuar assim neste ambiente.",
-          color = Color(0xFF94A3B8),
-          fontSize = 13.sp,
-          lineHeight = 18.sp,
-        )
-
-        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
           val activateInteractionSource = remember { MutableInteractionSource() }
           val isActivateFocused by activateInteractionSource.collectIsFocusedAsState()
 
@@ -265,7 +248,10 @@ private fun ActivationScreen(
             onClick = {
               if (screenId.isNotBlank()) onActivate(screenId, apiBaseUrl)
             },
-            modifier = Modifier.fillMaxWidth(),
+            modifier =
+              Modifier
+                .widthIn(min = 180.dp)
+                .height(72.dp),
             interactionSource = activateInteractionSource,
             shape = RoundedCornerShape(14.dp),
             colors =
@@ -291,10 +277,38 @@ private fun ActivationScreen(
               },
           ) {
             Text(
-              text = "Ativar nesta TV",
+              text = "Ativar",
+              fontSize = 18.sp,
               fontWeight = if (isActivateFocused) FontWeight.Bold else FontWeight.SemiBold,
             )
           }
+        }
+
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.spacedBy(12.dp),
+          verticalAlignment = Alignment.CenterVertically,
+        ) {
+          OutlinedTextField(
+            value = screenId,
+            onValueChange = { screenId = it },
+            label = { Text("Screen ID") },
+            placeholder = { Text("Ex.: tv") },
+            singleLine = true,
+            modifier = Modifier.weight(1f),
+            colors = fieldColors,
+          )
+
+          OutlinedTextField(
+            value = apiBaseUrl,
+            onValueChange = { apiBaseUrl = it },
+            label = { Text("Backend URL") },
+            placeholder = { Text("https://...") },
+            singleLine = true,
+            modifier = Modifier.weight(1.4f),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+            colors = fieldColors,
+          )
         }
       }
     }
