@@ -2,8 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { getPlayerData } from "@/lib/data";
-import type { Ad } from "@/lib/types";
-import { extractYouTubeId } from "./index";
+import type { Ad, ScreenDisplayMode } from "@/lib/types";
 
 export const Route = createFileRoute("/player/$screenId")({
   ssr: false,
@@ -18,29 +17,31 @@ function PlayerPage() {
     refetchInterval: 30_000,
   });
 
-  const [index, setIndex] = useState(0);
+  const [turn, setTurn] = useState(0);
   const ads = q.data?.ads ?? [];
-  const current = ads[index];
+  const screen = q.data?.screen;
+  const playlistSignature = ads.map((ad) => ad.id).join("|");
+  const currentIndex = ads.length > 0 ? turn % ads.length : 0;
+  const current = ads[currentIndex];
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (timerRef.current) clearTimeout(timerRef.current);
     if (!current) return;
-    // video handles its own advance via onEnded; images/youtube use timer
-    if (current.type === "image" || current.type === "youtube") {
-      timerRef.current = setTimeout(() => {
-        setIndex((i) => (i + 1) % Math.max(ads.length, 1));
-      }, current.duration * 1000);
-    }
+
+    timerRef.current = setTimeout(() => {
+      setTurn((value) => value + 1);
+    }, current.duration * 1000);
+
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current);
     };
-  }, [current, ads.length]);
+  }, [current, turn]);
 
-  // reset index if list shrinks
+  // Reset the rotation counter when the playlist changes.
   useEffect(() => {
-    if (index >= ads.length) setIndex(0);
-  }, [ads.length, index]);
+    setTurn(0);
+  }, [screenId, playlistSignature]);
 
   if (q.isLoading) {
     return (
@@ -50,7 +51,7 @@ function PlayerPage() {
     );
   }
 
-  if (!q.data?.screen) {
+  if (!screen) {
     return (
       <FullScreen>
         <div className="text-center text-white">
@@ -79,9 +80,10 @@ function PlayerPage() {
 
   return (
     <FullScreen>
-      <MediaFrame
+      <DisplayViewport
+        displayMode={screen.display_mode ?? "normal"}
         ad={current}
-        onEnded={() => setIndex((i) => (i + 1) % ads.length)}
+        isSingleAd={ads.length === 1}
       />
     </FullScreen>
   );
@@ -95,44 +97,54 @@ function FullScreen({ children }: { children: React.ReactNode }) {
   );
 }
 
-function MediaFrame({ ad, onEnded }: { ad: Ad; onEnded: () => void }) {
-  if (ad.type === "youtube") {
-    const id = extractYouTubeId(ad.source);
-    if (!id) return <ErrorMsg text="Link do YouTube inválido" />;
-    return (
-      <iframe
-        key={ad.id}
-        className="h-full w-full"
-        src={`https://www.youtube.com/embed/${id}?autoplay=1&controls=0&mute=0&modestbranding=1&rel=0&playsinline=1`}
-        allow="autoplay; encrypted-media"
-        allowFullScreen
-      />
-    );
-  }
+function DisplayViewport({
+  displayMode,
+  ad,
+  isSingleAd,
+}: {
+  displayMode: ScreenDisplayMode;
+  ad: Ad;
+  isSingleAd: boolean;
+}) {
+  const fillScreen =
+    displayMode === "fill" ||
+    displayMode === "rotate_90" ||
+    displayMode === "rotate_270";
+
+  return (
+    <div className="h-full w-full">
+      <MediaFrame ad={ad} isSingleAd={isSingleAd} fillScreen={fillScreen} />
+    </div>
+  );
+}
+
+function MediaFrame({
+  ad,
+  isSingleAd,
+  fillScreen,
+}: {
+  ad: Ad;
+  isSingleAd: boolean;
+  fillScreen: boolean;
+}) {
   if (ad.type === "video") {
     return (
       <video
-        key={ad.id}
-        className="h-full w-full object-contain"
+        className={`h-full w-full ${fillScreen ? "object-cover" : "object-contain"}`}
         src={ad.source}
         autoPlay
+        muted
+        loop
+        preload="auto"
         playsInline
-        onEnded={onEnded}
-        onError={onEnded}
       />
     );
   }
   return (
     <img
-      key={ad.id}
       src={ad.source}
       alt={ad.title}
-      className="h-full w-full object-contain"
-      onError={onEnded}
+      className={`h-full w-full ${fillScreen ? "object-cover" : "object-contain"}`}
     />
   );
-}
-
-function ErrorMsg({ text }: { text: string }) {
-  return <div className="text-white/70">{text}</div>;
 }

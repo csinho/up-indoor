@@ -15,10 +15,15 @@ dist-ssr
 .tanstack/**
 .nitro
 *.local
+.env
+.env.*
+.cursor/
 
 # Wrangler / Cloudflare
 .wrangler/
 .dev.vars
+.cursor/mcp.json
+
 
 # Editor directories and files
 .vscode/*
@@ -30,3 +35,8 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Android TV app
+tv-android/.gradle/
+tv-android/**/build/
+tv-android/local.properties

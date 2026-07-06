@@ -11,6 +11,7 @@ import { useEffect, type ReactNode } from "react";
 
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
+import { AuthProvider } from "../lib/auth";
 import { Toaster } from "@/components/ui/sonner";
 
 function NotFoundComponent() {
@@ -110,11 +111,64 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
 
 function RootShell({ children }: { children: ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="pt-BR" suppressHydrationWarning>
       <head>
         <HeadContent />
+        <script
+          suppressHydrationWarning
+          dangerouslySetInnerHTML={{
+            __html: `(function () {
+  function sanitizeAttributes(element) {
+    if (!element) return;
+    var attributes = Array.from(element.attributes || []);
+    for (var i = 0; i < attributes.length; i += 1) {
+      var name = attributes[i].name;
+      if (name === "cz-shortcut-listen" || name.indexOf("data-") === 0) {
+        element.removeAttribute(name);
+      }
+    }
+  }
+
+  function runSanitizer() {
+    sanitizeAttributes(document.documentElement);
+    sanitizeAttributes(document.body);
+  }
+
+  runSanitizer();
+
+  var observer = new MutationObserver(function () {
+    runSanitizer();
+  });
+
+  observer.observe(document.documentElement, { attributes: true });
+
+  if (document.body) {
+    observer.observe(document.body, { attributes: true });
+  } else {
+    document.addEventListener(
+      "DOMContentLoaded",
+      function () {
+        runSanitizer();
+        if (document.body) {
+          observer.observe(document.body, { attributes: true });
+        }
+      },
+      { once: true }
+    );
+  }
+
+  window.addEventListener(
+    "load",
+    function () {
+      observer.disconnect();
+    },
+    { once: true }
+  );
+})();`,
+          }}
+        />
       </head>
-      <body>
+      <body suppressHydrationWarning>
         {children}
         <Scripts />
       </body>
@@ -127,8 +181,10 @@ function RootComponent() {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <Outlet />
-      <Toaster position="top-right" richColors />
+      <AuthProvider>
+        <Outlet />
+        <Toaster position="top-right" richColors />
+      </AuthProvider>
     </QueryClientProvider>
   );
 }

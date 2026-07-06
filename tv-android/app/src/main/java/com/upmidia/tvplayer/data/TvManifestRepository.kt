@@ -1,0 +1,212 @@
+package com.upmidia.tvplayer.data
+
+import android.os.Build
+import com.upmidia.tvplayer.BuildConfig
+import com.upmidia.tvplayer.model.TvDeviceSession
+import com.upmidia.tvplayer.model.TvDisplayMode
+import com.upmidia.tvplayer.model.TvLayoutRegion
+import com.upmidia.tvplayer.model.TvOrientation
+import com.upmidia.tvplayer.model.TvRegionItem
+import com.upmidia.tvplayer.model.TvRegionItemType
+import com.upmidia.tvplayer.model.TvRegionType
+import com.upmidia.tvplayer.model.TvScreenManifest
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import org.json.JSONArray
+import org.json.JSONObject
+import java.io.BufferedReader
+import java.io.InputStreamReader
+import java.net.HttpURLConnection
+import java.net.URL
+
+class TvBackendException(
+  val statusCode: Int,
+  val errorCode: String?,
+  override val message: String,
+) : IllegalStateException(message)
+
+class TvManifestRepository {
+  suspend fun syncDeviceAndLoadManifest(session: TvDeviceSession): TvScreenManifest {
+    return withContext(Dispatchers.IO) {
+      val baseUrl = normalizeBaseUrl(session.apiBaseUrl)
+      registerDevice(baseUrl, session)
+      fetchManifest(baseUrl, session.deviceCode)
+    }
+  }
+
+  suspend fun loadManifest(session: TvDeviceSession): TvScreenManifest {
+    return withContext(Dispatchers.IO) {
+      val baseUrl = normalizeBaseUrl(session.apiBaseUrl)
+      fetchManifest(baseUrl, session.deviceCode)
+    }
+  }
+
+  suspend fun sendHeartbeat(
+    session: TvDeviceSession,
+    status: String,
+    playlistVersion: Long? = null,
+    meta: JSONObject? = null,
+  ) {
+    return withContext(Dispatchers.IO) {
+      val baseUrl = normalizeBaseUrl(session.apiBaseUrl)
+      val payload =
+        JSONObject()
+          .put("deviceCode", session.deviceCode)
+          .put("screenId", session.screenId)
+          .put("status", status)
+          .put("networkState", "online")
+
+      if (playlistVersion != null) {
+        payload.put("playlistVersion", playlistVersion)
+      }
+
+      if (meta != null) {
+        payload.put("meta", meta)
+      }
+
+      postJson("$baseUrl/functions/v1/tv-device-heartbeat", payload)
+    }
+  }
+
+  private fun registerDevice(baseUrl: String, session: TvDeviceSession) {
+    val payload =
+      JSONObject()
+        .put("deviceCode", session.deviceCode)
+        .put("screenId", session.screenId)
+        .put("deviceName", "${Build.MANUFACTURER} ${Build.MODEL}".trim())
+        .put("platform", "android_tv")
+        .put("appVersion", BuildConfig.VERSION_NAME)
+        .put("osVersion", Build.VERSION.RELEASE ?: "unknown")
+
+    postJson("$baseUrl/functions/v1/tv-register-device", payload)
+  }
+
+  private fun fetchManifest(baseUrl: String, deviceCode: String): TvScreenManifest {
+    val payload = JSONObject().put("deviceCode", deviceCode)
+    val json = postJson("$baseUrl/functions/v1/tv-player-manifest", payload)
+    return parseManifest(json)
+  }
+
+  private fun postJson(url: String, body: JSONObject): JSONObject {
+    val connection = (URL(url).openConnection() as HttpURLConnection).apply {
+      requestMethod = "POST"
+      connectTimeout = 30_000
+      readTimeout = 30_000
+      doOutput = true
+      setRequestProperty("Content-Type", "application/json")
+      setRequestProperty("apikey", BackendConfig.publishableKey)
+      setRequestProperty("Authorization", "Bearer ${BackendConfig.publishableKey}")
+    }
+
+    connection.outputStream.use { output ->
+      output.write(body.toString().toByteArray())
+    }
+
+    val stream =
+      if (connection.responseCode in 200..299) {
+        connection.inputStream
+      } else {
+        connection.errorStream
+      }
+
+    val response =
+      stream.use { input ->
+        BufferedReader(InputStreamReader(input)).readText()
+      }
+
+    val json = JSONObject(response.ifBlank { "{}" })
+    if (connection.responseCode !in 200..299) {
+      throw TvBackendException(
+        statusCode = connection.responseCode,
+        errorCode = json.optString("error").ifBlank { null },
+        message =
+          json.optString("message").ifBlank {
+            "HTTP ${connection.responseCode} while calling $url"
+          },
+      )
+    }
+
+    return json
+  }
+
+  private fun parseManifest(json: JSONObject): TvScreenManifest {
+    return TvScreenManifest(
+      screenId = json.getString("screenId"),
+      screenName = json.optString("screenName", json.getString("screenId")),
+      orientation =
+        if (json.optString("orientation") == "portrait") {
+          TvOrientation.PORTRAIT
+        } else {
+          TvOrientation.LANDSCAPE
+        },
+      displayMode =
+        when (json.optString("displayMode", "normal")) {
+          "rotate_90" -> TvDisplayMode.ROTATE_90
+          "rotate_270" -> TvDisplayMode.ROTATE_270
+          "fill" -> TvDisplayMode.FILL
+          else -> TvDisplayMode.NORMAL
+        },
+      playlistVersion = json.optLong("playlistVersion", 1L),
+      canvasWidth = json.optInt("canvasWidth", 1920),
+      canvasHeight = json.optInt("canvasHeight", 1080),
+      regions = parseRegions(json.optJSONArray("regions") ?: JSONArray()),
+    )
+  }
+
+  private fun parseRegions(jsonArray: JSONArray): List<TvLayoutRegion> {
+    return buildList {
+      for (index in 0 until jsonArray.length()) {
+        val region = jsonArray.getJSONObject(index)
+        add(
+          TvLayoutRegion(
+            id = region.getString("id"),
+            name = region.optString("name", "Regiao ${index + 1}"),
+            type =
+              if (region.optString("type") == "banner") {
+                TvRegionType.BANNER
+              } else {
+                TvRegionType.MEDIA
+              },
+            x = region.optInt("x", 0),
+            y = region.optInt("y", 0),
+            width = region.optInt("width", 1),
+            height = region.optInt("height", 1),
+            zIndex = region.optInt("zIndex", 1),
+            backgroundHex = region.optString("backgroundHex", "#111827"),
+            items = parseItems(region.optJSONArray("items") ?: JSONArray()),
+          ),
+        )
+      }
+    }
+  }
+
+  private fun parseItems(jsonArray: JSONArray): List<TvRegionItem> {
+    return buildList {
+      for (index in 0 until jsonArray.length()) {
+        val item = jsonArray.getJSONObject(index)
+        add(
+          TvRegionItem(
+            id = item.getString("id"),
+            type =
+              when (item.optString("type")) {
+                "image" -> TvRegionItemType.IMAGE
+                "banner" -> TvRegionItemType.BANNER
+                else -> TvRegionItemType.VIDEO
+              },
+            title = item.optString("title", "Item ${index + 1}"),
+            source = item.optString("source").ifBlank { null },
+            bannerText = item.optString("bannerText").ifBlank { null },
+            backgroundHex = item.optString("backgroundHex", "#111827"),
+            textHex = item.optString("textHex", "#FFFFFF"),
+            durationSeconds = item.optInt("durationSeconds", 15),
+          ),
+        )
+      }
+    }
+  }
+
+  private fun normalizeBaseUrl(baseUrl: String?): String {
+    return (baseUrl?.trim()?.ifBlank { null } ?: BackendConfig.defaultBaseUrl)
+      .removeSuffix("/")
+  }
+}

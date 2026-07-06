@@ -1,0 +1,258 @@
+import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+
+import {
+  corsHeaders,
+  createAdminClient,
+  formatError,
+  isAdRunningNow,
+  migrateInlineMediaSource,
+  jsonResponse,
+  orientationMatches,
+} from "../_shared/tv.ts";
+
+type ScreenRow = {
+  id: string;
+  name: string;
+  orientation: "landscape" | "portrait";
+  display_mode: "normal" | "rotate_90" | "rotate_270" | "fill";
+  resolution_width: number;
+  resolution_height: number;
+  playlist_version: number;
+  active: boolean;
+};
+
+type AdRow = {
+  id: string;
+  title: string;
+  type: "image" | "video" | "youtube";
+  source: string;
+  duration: number;
+  active: boolean;
+  starts_at: string | null;
+  ends_at: string | null;
+  position: number;
+  preferred_orientation: "landscape" | "portrait" | "any";
+  screen_ids: string[];
+};
+
+type LayoutTemplateRow = {
+  id: string;
+  name: string;
+  orientation: "landscape" | "portrait";
+  canvas_width: number;
+  canvas_height: number;
+};
+
+type LayoutRegionRow = {
+  id: string;
+  layout_template_id: string;
+  name: string;
+  region_type: "media" | "banner";
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  z_index: number;
+  background: string;
+};
+
+type LayoutRegionItemRow = {
+  id: string;
+  layout_region_id: string;
+  item_type: "ad" | "banner";
+  ad_id: string | null;
+  title: string;
+  banner_text: string | null;
+  background: string;
+  text_color: string;
+  fit_mode: "cover" | "contain";
+  position: number;
+  active: boolean;
+};
+
+function sortAds(left: AdRow, right: AdRow) {
+  const positionDiff = left.position - right.position;
+  if (positionDiff !== 0) return positionDiff;
+  return left.id.localeCompare(right.id);
+}
+
+function mapAdToManifestItem(ad: AdRow) {
+  return {
+    id: ad.id,
+    type: ad.type,
+    title: ad.title,
+    source: ad.source,
+    durationSeconds: ad.duration,
+    backgroundHex: "#111827",
+    textHex: "#FFFFFF",
+  };
+}
+
+Deno.serve(async (request: Request) => {
+  if (request.method === "OPTIONS") {
+    return new Response("ok", { headers: corsHeaders });
+  }
+
+  if (request.method !== "POST") {
+    return jsonResponse({ error: "method_not_allowed" }, 405);
+  }
+
+  try {
+    const body = await request.json();
+    const deviceCode = String(body.deviceCode ?? "")
+      .trim()
+      .toUpperCase();
+
+    if (!deviceCode) {
+      return jsonResponse(
+        { error: "invalid_device_code", message: "deviceCode is required." },
+        400,
+      );
+    }
+
+    const supabase = createAdminClient();
+
+    const { data: device, error: deviceError } = await supabase
+      .from("tv_devices")
+      .select("id, device_code, screen_id, active")
+      .eq("device_code", deviceCode)
+      .maybeSingle();
+
+    if (deviceError) {
+      throw deviceError;
+    }
+
+    if (!device || !device.active) {
+      return jsonResponse(
+        {
+          error: "device_not_registered",
+          message: "Device was not found or is inactive.",
+        },
+        404,
+      );
+    }
+
+    if (!device.screen_id) {
+      return jsonResponse(
+        {
+          error: "device_not_paired",
+          message: "Device exists but does not have a screen assigned yet.",
+        },
+        409,
+      );
+    }
+
+    const { data: screen, error: screenError } = await supabase
+      .from("screens")
+      .select(
+        "id, name, orientation, display_mode, resolution_width, resolution_height, layout_template_id, playlist_version, active",
+      )
+      .eq("id", device.screen_id)
+      .single();
+
+    if (screenError) {
+      throw screenError;
+    }
+
+    const typedScreen = screen as ScreenRow;
+    if (!typedScreen.active) {
+      return jsonResponse(
+        {
+          error: "screen_inactive",
+          message: "The screen assigned to this device is inactive.",
+        },
+        409,
+      );
+    }
+
+    const { data: adsData, error: adsError } = await supabase
+      .from("ads")
+      .select(
+        "id, title, type, source, duration, active, starts_at, ends_at, position, preferred_orientation, screen_ids",
+      )
+      .contains("screen_ids", [typedScreen.id]);
+
+    if (adsError) {
+      throw adsError;
+    }
+
+    const filteredAds = ((adsData ?? []) as AdRow[])
+      .filter((ad) => isAdRunningNow(ad))
+      .filter((ad) => ad.type === "image" || ad.type === "video")
+      .filter((ad) =>
+        orientationMatches(typedScreen.orientation, ad.preferred_orientation),
+      )
+      .sort(sortAds);
+
+    const activeAds: AdRow[] = [];
+    for (const ad of filteredAds) {
+      const source = await migrateInlineMediaSource(supabase, ad);
+      activeAds.push({
+        ...ad,
+        source,
+      });
+    }
+
+    const manifest = {
+      screenId: typedScreen.id,
+      screenName: typedScreen.name,
+      orientation: typedScreen.orientation,
+      displayMode: typedScreen.display_mode ?? "normal",
+      playlistVersion: typedScreen.playlist_version,
+      canvasWidth: typedScreen.resolution_width,
+      canvasHeight: typedScreen.resolution_height,
+      regions: [
+        {
+          id: "fallback-main",
+          name: "Principal",
+          type: "media",
+          x: 0,
+          y: 0,
+          width: typedScreen.resolution_width,
+          height: typedScreen.resolution_height,
+          zIndex: 1,
+          backgroundHex: "#000000",
+          items: activeAds.map(mapAdToManifestItem),
+        },
+      ],
+    };
+
+    const now = new Date().toISOString();
+    await supabase
+      .from("tv_devices")
+      .update({
+        status: "online",
+        last_seen_at: now,
+        last_playlist_version: typedScreen.playlist_version,
+      })
+      .eq("id", device.id);
+
+    await supabase.from("tv_device_heartbeats").insert({
+      device_id: device.id,
+      screen_id: typedScreen.id,
+      status: manifest.regions.some((region) => region.items.length > 0)
+        ? "playing"
+        : "online",
+      playlist_version: typedScreen.playlist_version,
+      current_ad_id:
+        manifest.regions.flatMap((region) => region.items).find((item) =>
+          item.type === "video" || item.type === "image",
+        )?.id ?? null,
+      network_state: "online",
+      meta: {
+        source: "tv-player-manifest",
+      },
+    });
+
+    return jsonResponse(manifest);
+  } catch (error) {
+    console.error("tv-player-manifest failed", error);
+    return jsonResponse(
+      {
+        error: "manifest_failed",
+        message: formatError(error),
+      },
+      500,
+    );
+  }
+});
