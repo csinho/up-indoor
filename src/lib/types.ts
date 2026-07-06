@@ -89,6 +89,7 @@ export interface CompanyInput
 
 export interface Ad {
   id: string;
+  public_code: string;
   title: string;
   advertiser: string;
   screen_ids: string[];
@@ -104,8 +105,10 @@ export interface Ad {
   preferred_orientation?: AdOrientation;
 }
 
-export interface AdInput extends Omit<Ad, "id" | "created_at" | "position"> {
+export interface AdInput
+  extends Omit<Ad, "id" | "created_at" | "position" | "public_code"> {
   position?: number;
+  public_code?: string;
 }
 
 export interface ScreenInput

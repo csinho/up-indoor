@@ -42,7 +42,11 @@ import {
   updateCompany,
   updateStore,
 } from "@/lib/data";
-import { CompanyAdsSection } from "@/components/company-ads";
+import {
+  AdSearchResults,
+  CompanyAdsSection,
+  searchAdsAcrossCompanies,
+} from "@/components/company-ads";
 import { SearchField, normalizeSearch } from "@/components/list-filters";
 import {
   DEFAULT_PAGE_SIZE,
@@ -433,6 +437,7 @@ export function CompaniesTab({
   const [editing, setEditing] = useState<Company | null>(null);
   const [viewingTvs, setViewingTvs] = useState<Company | null>(null);
   const [selectedCompany, setSelectedCompany] = useState<Company | null>(null);
+  const [focusAdId, setFocusAdId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("all");
 
@@ -458,6 +463,19 @@ export function CompaniesTab({
     return map;
   }, [ads]);
 
+  const matchingAds = useMemo(
+    () => searchAdsAcrossCompanies(ads, companies, categories, search),
+    [ads, companies, categories, search],
+  );
+
+  const companyIdsWithMatchingAds = useMemo(() => {
+    return new Set(
+      matchingAds
+        .map((ad) => ad.company_id)
+        .filter((companyId): companyId is string => Boolean(companyId)),
+    );
+  }, [matchingAds]);
+
   const filteredCompanies = useMemo(() => {
     const query = normalizeSearch(search);
     return companies.filter((company) => {
@@ -468,6 +486,7 @@ export function CompaniesTab({
         return false;
       }
       if (!query) return true;
+      if (companyIdsWithMatchingAds.has(company.id)) return true;
       const haystack = [
         company.name,
         company.contact_name,
@@ -478,7 +497,14 @@ export function CompaniesTab({
         .toLowerCase();
       return haystack.includes(query);
     });
-  }, [billingFilter, categoryFilter, companies, search, categories]);
+  }, [
+    billingFilter,
+    categoryFilter,
+    companies,
+    companyIdsWithMatchingAds,
+    search,
+    categories,
+  ]);
 
   const companiesPagination = usePaginatedItems(
     filteredCompanies,
@@ -535,9 +561,13 @@ export function CompaniesTab({
 
           <CompanyAdsSection
             company={selectedCompany}
+            companies={companies}
+            categories={categories}
             ads={ads}
             companyScreens={companyScreens}
             qc={qc}
+            focusAdId={focusAdId}
+            onFocusAdHandled={() => setFocusAdId(null)}
           />
         </div>
 
@@ -608,7 +638,7 @@ export function CompaniesTab({
         <SearchField
           value={search}
           onChange={setSearch}
-          placeholder="Buscar empresa, contato ou e-mail..."
+          placeholder="Buscar anúncio, código, empresa ou categoria..."
         />
         <Select value={categoryFilter} onValueChange={setCategoryFilter}>
           <SelectTrigger className="w-full sm:w-[200px]">
@@ -624,6 +654,20 @@ export function CompaniesTab({
           </SelectContent>
         </Select>
       </div>
+
+      <AdSearchResults
+        ads={matchingAds}
+        companies={companies}
+        onSelect={(ad) => {
+          const target = companies.find((company) => company.id === ad.company_id);
+          if (!target) {
+            toast.error("Empresa deste anúncio não foi encontrada.");
+            return;
+          }
+          setFocusAdId(ad.id);
+          setSelectedCompany(target);
+        }}
+      />
 
       {loading ? (
         <p className="text-sm text-muted-foreground">Carregando empresas...</p>

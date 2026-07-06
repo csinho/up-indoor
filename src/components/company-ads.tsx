@@ -1,6 +1,16 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
-import { Clock, LoaderCircle, Pencil, Play, Plus, RefreshCw, Trash2, Tv } from "lucide-react";
+import {
+  Clock,
+  Copy,
+  LoaderCircle,
+  Pencil,
+  Play,
+  Plus,
+  RefreshCw,
+  Trash2,
+  Tv,
+} from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -29,7 +39,6 @@ import {
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
-import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import {
   AlertDialog,
@@ -41,6 +50,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { normalizeAdPublicCode } from "@/lib/ad-public-code";
 import {
   createAd,
   deleteAd,
@@ -62,6 +72,7 @@ import type {
   Ad,
   AdInput,
   AdOrientation,
+  Category,
   Company,
   CompanyScreen,
   MediaType,
@@ -106,19 +117,94 @@ function getPlaybackScheduleMessage(
   return "Este anúncio não está disponível para exibição agora.";
 }
 
-function MediaThumb({ ad, className }: { ad: Ad; className?: string }) {
-  if (ad.type === "video") {
+function getAdPreviewSource(ad: Ad) {
+  if (!ad.source || isInlineMediaSource(ad.source)) return null;
+  return ad.source;
+}
+
+function adMatchesQuery(
+  ad: Ad,
+  query: string,
+  companyName?: string,
+  categoryName?: string,
+) {
+  if (!query) return true;
+  const haystack = [
+    ad.title,
+    ad.public_code,
+    ad.advertiser,
+    companyName,
+    categoryName,
+    ad.id,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+  return haystack.includes(query);
+}
+
+function AdMediaPreview({
+  type,
+  previewUrl,
+  className,
+}: {
+  type: MediaType;
+  previewUrl: string;
+  className?: string;
+}) {
+  if (!previewUrl) return null;
+
+  if (type === "video") {
     return (
+      <video
+        src={previewUrl}
+        className={className}
+        controls
+        muted
+        playsInline
+        preload="metadata"
+      />
+    );
+  }
+
+  return (
+    <img src={previewUrl} alt="Prévia da mídia" className={className} />
+  );
+}
+
+function MediaThumb({ ad, className }: { ad: Ad; className?: string }) {
+  const previewSource = getAdPreviewSource(ad);
+
+  if (ad.type === "video") {
+    return previewSource ? (
+      <video
+        src={previewSource}
+        className={`object-cover ${className}`}
+        muted
+        playsInline
+        preload="metadata"
+      />
+    ) : (
       <div className={`grid place-items-center bg-muted text-muted-foreground ${className}`}>
         <Play className="h-6 w-6" />
       </div>
     );
   }
-  return ad.source ? (
-    <img src={ad.source} alt={ad.title} className={`object-cover ${className}`} />
+
+  return previewSource ? (
+    <img src={previewSource} alt={ad.title} className={`object-cover ${className}`} />
   ) : (
     <div className={`bg-muted ${className}`} />
   );
+}
+
+async function copyAdCode(code: string) {
+  try {
+    await navigator.clipboard.writeText(code);
+    toast.success("Código copiado");
+  } catch {
+    toast.error("Não foi possível copiar o código");
+  }
 }
 
 function AdCard({
@@ -158,6 +244,15 @@ function AdCard({
       </div>
       <div className="p-4">
         <h3 className="truncate text-base font-semibold">{ad.title}</h3>
+        <button
+          type="button"
+          className="mt-2 inline-flex items-center gap-1 rounded-md border border-border/70 bg-muted/40 px-2 py-1 font-mono text-xs text-muted-foreground transition hover:text-foreground"
+          onClick={() => copyAdCode(ad.public_code)}
+          title="Copiar código do anúncio"
+        >
+          {ad.public_code}
+          <Copy className="h-3 w-3" />
+        </button>
         <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
           <span className="inline-flex items-center gap-1">
             <Tv className="h-3 w-3" /> {getOrientationLabel(ad.preferred_orientation)}
@@ -204,51 +299,106 @@ function AdCard({
 function AdFormDialog({
   open,
   onOpenChange,
-  company,
+  companies,
+  defaultCompanyId,
   onSubmit,
   initial,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  company: Company;
+  companies: Company[];
+  defaultCompanyId: string;
   onSubmit: (values: AdInput) => Promise<void>;
   initial?: Ad;
 }) {
+  const [companyId, setCompanyId] = useState(defaultCompanyId);
   const [title, setTitle] = useState("");
   const [type, setType] = useState<MediaType>("image");
   const [preferredOrientation, setPreferredOrientation] =
     useState<AdOrientation>("any");
-  const [source, setSource] = useState("");
+  const [remoteUrl, setRemoteUrl] = useState("");
+  const [previewUrl, setPreviewUrl] = useState("");
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [pendingInlineUpload, setPendingInlineUpload] = useState<string | null>(
+    null,
+  );
   const [duration, setDuration] = useState(10);
   const [active, setActive] = useState(true);
   const [startsAt, setStartsAt] = useState("");
   const [endsAt, setEndsAt] = useState("");
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const blobUrlRef = useRef<string | null>(null);
+
+  const selectedCompany = companies.find((company) => company.id === companyId);
+
+  const revokeBlobPreview = () => {
+    if (blobUrlRef.current) {
+      URL.revokeObjectURL(blobUrlRef.current);
+      blobUrlRef.current = null;
+    }
+  };
 
   useEffect(() => {
     if (!open) return;
+
+    setCompanyId(initial?.company_id ?? defaultCompanyId);
     setTitle(initial?.title ?? "");
     setType(initial?.type === "video" ? "video" : "image");
     setPreferredOrientation(initial?.preferred_orientation ?? "any");
-    setSource(initial?.source ?? "");
     setDuration(initial?.duration ?? 10);
     setActive(initial?.active ?? true);
     setStartsAt(initial?.starts_at?.slice(0, 16) ?? "");
     setEndsAt(initial?.ends_at?.slice(0, 16) ?? "");
-    setSelectedFile(null);
+    setUploadFile(null);
     setSubmitting(false);
-  }, [open, initial]);
+    revokeBlobPreview();
 
-  const onFile = async (file: File | null) => {
+    if (initial?.source && isInlineMediaSource(initial.source)) {
+      setPendingInlineUpload(initial.source);
+      setRemoteUrl("");
+      setPreviewUrl(initial.source);
+      return;
+    }
+
+    setPendingInlineUpload(null);
+    const existingUrl = initial?.source && !isInlineMediaSource(initial.source)
+      ? initial.source
+      : "";
+    setRemoteUrl(existingUrl);
+    setPreviewUrl(existingUrl);
+  }, [open, initial, defaultCompanyId]);
+
+  useEffect(() => {
+    return () => revokeBlobPreview();
+  }, []);
+
+  const onFile = (file: File | null) => {
     if (!file) return;
-    setSelectedFile(file);
-    const reader = new FileReader();
-    reader.onload = () => setSource(String(reader.result || ""));
-    reader.readAsDataURL(file);
+    revokeBlobPreview();
+    const objectUrl = URL.createObjectURL(file);
+    blobUrlRef.current = objectUrl;
+    setUploadFile(file);
+    setPendingInlineUpload(null);
+    setRemoteUrl("");
+    setPreviewUrl(objectUrl);
     if (file.type.startsWith("video")) setType("video");
     else if (file.type.startsWith("image")) setType("image");
   };
+
+  const onRemoteUrlChange = (value: string) => {
+    setRemoteUrl(value);
+    setUploadFile(null);
+    setPendingInlineUpload(null);
+    revokeBlobPreview();
+    const trimmed = value.trim();
+    setPreviewUrl(trimmed);
+  };
+
+  const hasMedia =
+    Boolean(uploadFile) ||
+    Boolean(pendingInlineUpload) ||
+    Boolean(remoteUrl.trim()) ||
+    Boolean(previewUrl);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -256,11 +406,38 @@ function AdFormDialog({
         <DialogHeader>
           <DialogTitle>{initial ? "Editar anúncio" : "Novo anúncio"}</DialogTitle>
           <DialogDescription>
-            Anúncio da empresa <strong>{company.name}</strong>.
+            {initial ? (
+              <>
+                Código <strong className="font-mono">{initial.public_code}</strong>
+                {selectedCompany ? (
+                  <>
+                    {" "}
+                    · empresa <strong>{selectedCompany.name}</strong>
+                  </>
+                ) : null}
+              </>
+            ) : (
+              <>Crie um anúncio e vincule à empresa desejada.</>
+            )}
           </DialogDescription>
         </DialogHeader>
 
         <div className="grid gap-4 md:grid-cols-2">
+          <div className="md:col-span-2">
+            <Label>Empresa</Label>
+            <Select value={companyId} onValueChange={setCompanyId}>
+              <SelectTrigger>
+                <SelectValue placeholder="Selecione a empresa" />
+              </SelectTrigger>
+              <SelectContent>
+                {companies.map((company) => (
+                  <SelectItem key={company.id} value={company.id}>
+                    {company.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
           <div className="md:col-span-2">
             <Label>Título</Label>
             <Input value={title} onChange={(event) => setTitle(event.target.value)} />
@@ -305,13 +482,16 @@ function AdFormDialog({
             </Select>
           </div>
           <div className="md:col-span-2">
-            <Label>URL da mídia</Label>
-            <Textarea
-              value={source}
-              onChange={(event) => setSource(event.target.value)}
+            <Label>URL da mídia (opcional)</Label>
+            <Input
+              value={remoteUrl}
+              onChange={(event) => onRemoteUrlChange(event.target.value)}
               placeholder="https://exemplo.com/banner.jpg"
-              rows={2}
             />
+            <p className="mt-1 text-xs text-muted-foreground">
+              Cole uma URL pública ou envie um arquivo abaixo. O conteúdo enviado
+              fica no Storage após salvar.
+            </p>
           </div>
           <div className="md:col-span-2">
             <Label>Ou envie um arquivo</Label>
@@ -321,6 +501,23 @@ function AdFormDialog({
               onChange={(event) => onFile(event.target.files?.[0] ?? null)}
             />
           </div>
+          {hasMedia ? (
+            <div className="md:col-span-2 overflow-hidden rounded-xl border border-border bg-muted/30">
+              <AdMediaPreview
+                type={type}
+                previewUrl={previewUrl}
+                className="max-h-56 w-full object-contain"
+              />
+            </div>
+          ) : null}
+          {remoteUrl && !isInlineMediaSource(remoteUrl) ? (
+            <div className="md:col-span-2">
+              <Label className="text-xs text-muted-foreground">URL salva</Label>
+              <p className="truncate rounded-md border border-border/60 bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+                {remoteUrl}
+              </p>
+            </div>
+          ) : null}
           <div>
             <Label>Início (opcional)</Label>
             <Input
@@ -340,8 +537,7 @@ function AdFormDialog({
         </div>
 
         <p className="text-xs text-muted-foreground">
-          Este anúncio passa nas TVs onde a empresa está vinculada (aba TVs). Para pausar só
-          este anúncio, use o switch abaixo.
+          Este anúncio passa nas TVs onde a empresa está vinculada (aba TVs).
         </p>
 
         <div className="mt-4 flex items-center justify-between rounded-lg border border-border/60 p-3">
@@ -355,34 +551,58 @@ function AdFormDialog({
           </Button>
           <Button
             className="gradient-brand text-brand-foreground"
-            disabled={!title.trim() || (!source && !selectedFile) || submitting}
+            disabled={!title.trim() || !hasMedia || !companyId || submitting}
             onClick={async () => {
+              if (!selectedCompany) {
+                toast.error("Selecione uma empresa.");
+                return;
+              }
+
               try {
                 setSubmitting(true);
-                let finalSource = source;
+                let finalSource = remoteUrl.trim();
+
                 if (supabaseEnabled) {
-                  if (selectedFile) {
-                    finalSource = await uploadAdMediaFile(selectedFile);
-                  } else if (isInlineMediaSource(source)) {
+                  if (uploadFile) {
+                    finalSource = await uploadAdMediaFile(uploadFile);
+                  } else if (
+                    pendingInlineUpload &&
+                    isInlineMediaSource(pendingInlineUpload)
+                  ) {
                     const extension = type === "video" ? "mp4" : "png";
                     finalSource = await uploadAdMediaDataUri(
-                      source,
+                      pendingInlineUpload,
                       `${title || "anuncio"}.${extension}`,
                     );
                   }
                 }
+
+                if (!finalSource && initial?.source) {
+                  finalSource = initial.source;
+                }
+
+                if (!finalSource) {
+                  throw new Error("Informe uma mídia para o anúncio.");
+                }
+
+                if (isInlineMediaSource(finalSource)) {
+                  throw new Error(
+                    "A mídia ainda não foi enviada ao Storage. Selecione o arquivo novamente ou aguarde o upload.",
+                  );
+                }
+
                 const payload: AdInput = {
-                  title,
-                  advertiser: company.name,
+                  title: title.trim(),
+                  advertiser: selectedCompany.name,
                   type,
                   source: finalSource,
                   duration,
                   preferred_orientation: preferredOrientation,
-                  screen_ids: [],
+                  screen_ids: initial?.screen_ids ?? [],
                   active,
                   starts_at: startsAt ? new Date(startsAt).toISOString() : null,
                   ends_at: endsAt ? new Date(endsAt).toISOString() : null,
-                  company_id: company.id,
+                  company_id: companyId,
                 };
                 await onSubmit(payload);
               } catch (error) {
@@ -410,14 +630,22 @@ function AdFormDialog({
 
 export function CompanyAdsSection({
   company,
+  companies,
+  categories,
   ads,
   companyScreens,
   qc,
+  focusAdId,
+  onFocusAdHandled,
 }: {
   company: Company;
+  companies: Company[];
+  categories: Category[];
   ads: Ad[];
   companyScreens: CompanyScreen[];
   qc: QueryClient;
+  focusAdId?: string | null;
+  onFocusAdHandled?: () => void;
 }) {
   const [openCreate, setOpenCreate] = useState(false);
   const [editing, setEditing] = useState<Ad | null>(null);
@@ -427,6 +655,9 @@ export function CompanyAdsSection({
   const [typeFilter, setTypeFilter] = useState<AdTypeFilter>("all");
   const [orientationFilter, setOrientationFilter] =
     useState<AdOrientationFilter>("all");
+
+  const categoryLabel = (id: string | null) =>
+    categories.find((category) => category.id === id)?.name ?? "";
 
   const linkedTvCount = useMemo(
     () =>
@@ -446,8 +677,18 @@ export function CompanyAdsSection({
     [ads, company.id],
   );
 
+  useEffect(() => {
+    if (!focusAdId) return;
+    const ad = companyAds.find((entry) => entry.id === focusAdId);
+    if (ad) {
+      setEditing(ad);
+      onFocusAdHandled?.();
+    }
+  }, [companyAds, focusAdId, onFocusAdHandled]);
+
   const filteredAds = useMemo(() => {
     const query = normalizeSearch(search);
+    const companyCategory = categoryLabel(company.category_id);
     return companyAds.filter((ad) => {
       if (typeFilter !== "all" && ad.type !== typeFilter) return false;
       if (
@@ -461,10 +702,18 @@ export function CompanyAdsSection({
       if (statusFilter === "paused" && status !== "paused") return false;
       if (statusFilter === "scheduled" && status !== "scheduled") return false;
       if (statusFilter === "expired" && status !== "expired") return false;
-      if (!query) return true;
-      return ad.title.toLowerCase().includes(query);
+      return adMatchesQuery(ad, query, company.name, companyCategory);
     });
-  }, [companyAds, orientationFilter, search, statusFilter, typeFilter]);
+  }, [
+    company.category_id,
+    company.name,
+    companyAds,
+    categoryLabel,
+    orientationFilter,
+    search,
+    statusFilter,
+    typeFilter,
+  ]);
 
   const adsPagination = usePaginatedItems(
     filteredAds,
@@ -524,7 +773,7 @@ export function CompanyAdsSection({
         <SearchField
           value={search}
           onChange={setSearch}
-          placeholder="Buscar anúncio..."
+          placeholder="Buscar por título, código ou empresa..."
         />
         <Select
           value={statusFilter}
@@ -612,7 +861,8 @@ export function CompanyAdsSection({
       <AdFormDialog
         open={openCreate}
         onOpenChange={setOpenCreate}
-        company={company}
+        companies={companies}
+        defaultCompanyId={company.id}
         onSubmit={async (values) => {
           await createAd(values);
           qc.invalidateQueries({ queryKey: ["ads"] });
@@ -623,11 +873,23 @@ export function CompanyAdsSection({
       <AdFormDialog
         open={!!editing}
         onOpenChange={(open) => !open && setEditing(null)}
-        company={company}
+        companies={companies}
+        defaultCompanyId={company.id}
         initial={editing ?? undefined}
         onSubmit={async (values) => {
           if (!editing) return;
-          await updateAd(editing.id, values);
+          await updateAd(editing.id, {
+            title: values.title,
+            advertiser: values.advertiser,
+            type: values.type,
+            source: values.source,
+            duration: values.duration,
+            preferred_orientation: values.preferred_orientation,
+            active: values.active,
+            starts_at: values.starts_at,
+            ends_at: values.ends_at,
+            company_id: values.company_id,
+          });
           qc.invalidateQueries({ queryKey: ["ads"] });
           toast.success("Anúncio atualizado");
           setEditing(null);
@@ -655,4 +917,92 @@ export function CompanyAdsSection({
       </AlertDialog>
     </div>
   );
+}
+
+export function searchAdsAcrossCompanies(
+  ads: Ad[],
+  companies: Company[],
+  categories: Category[],
+  search: string,
+) {
+  const query = normalizeSearch(search);
+  if (!query) return [];
+
+  const companyById = new Map(companies.map((company) => [company.id, company]));
+  const categoryById = new Map(categories.map((category) => [category.id, category]));
+
+  return sortAdsForPlayback(
+    ads.filter((ad) => {
+      if (ad.type !== "image" && ad.type !== "video") return false;
+      const linkedCompany = ad.company_id
+        ? companyById.get(ad.company_id)
+        : undefined;
+      const categoryName = linkedCompany?.category_id
+        ? categoryById.get(linkedCompany.category_id)?.name
+        : undefined;
+      return adMatchesQuery(
+        ad,
+        query,
+        linkedCompany?.name,
+        categoryName,
+      );
+    }),
+  );
+}
+
+export function AdSearchResults({
+  ads,
+  companies,
+  onSelect,
+}: {
+  ads: Ad[];
+  companies: Company[];
+  onSelect: (ad: Ad) => void;
+}) {
+  if (ads.length === 0) return null;
+
+  const companyById = new Map(companies.map((company) => [company.id, company]));
+
+  return (
+    <div className="mb-6 space-y-3 rounded-2xl border border-[color:var(--brand)]/30 bg-card p-4 shadow-card">
+      <div>
+        <h3 className="text-sm font-semibold">Anúncios encontrados</h3>
+        <p className="text-xs text-muted-foreground">
+          {ads.length} resultado(s) por título, código, empresa ou categoria
+        </p>
+      </div>
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+        {ads.slice(0, 9).map((ad) => {
+          const linkedCompany = ad.company_id
+            ? companyById.get(ad.company_id)
+            : undefined;
+          return (
+            <button
+              key={ad.id}
+              type="button"
+              className="overflow-hidden rounded-xl border border-border text-left transition hover:border-[color:var(--brand)]/40"
+              onClick={() => onSelect(ad)}
+            >
+              <div className="aspect-video bg-muted">
+                <MediaThumb ad={ad} className="h-full w-full" />
+              </div>
+              <div className="space-y-1 p-3">
+                <p className="truncate text-sm font-medium">{ad.title}</p>
+                <p className="font-mono text-xs text-muted-foreground">{ad.public_code}</p>
+                <p className="text-xs text-muted-foreground">
+                  {linkedCompany?.name ?? "Sem empresa"}
+                </p>
+              </div>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+export function matchesAdPublicCodeQuery(search: string, ad: Ad) {
+  const query = normalizeAdPublicCode(search);
+  if (!query) return false;
+  return normalizeAdPublicCode(ad.public_code).includes(query);
 }

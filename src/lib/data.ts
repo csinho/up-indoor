@@ -17,6 +17,7 @@ import type {
   TvDevice,
 } from "./types";
 import { isAdRunningNow, sortAdsForPlayback } from "./ad-utils";
+import { generateAdPublicCode } from "./ad-public-code";
 import { functionsUrl, supabase, supabaseEnabled } from "./supabase";
 
 /**
@@ -91,6 +92,7 @@ function seed(): Db {
     ads: [
       {
         id: crypto.randomUUID(),
+        public_code: generateAdPublicCode(),
         title: "Anuncie aqui",
         advertiser: "Sua empresa",
         screen_ids: ["tv-academia-teste"],
@@ -140,6 +142,7 @@ function normalizeDb(db: Db): Db {
 
   const ads = adsByCreation.map((ad, index) => ({
     ...ad,
+    public_code: ad.public_code ?? generateAdPublicCode(),
     position: normalizeAdPosition(ad.position) ?? index + 1,
     preferred_orientation: ad.preferred_orientation ?? "any",
   }));
@@ -649,6 +652,22 @@ export async function deleteLayoutTemplate(id: string): Promise<void> {
   writeLocal(db);
 }
 
+async function createUniqueAdPublicCode() {
+  if (supabaseEnabled && supabase) {
+    for (let attempt = 0; attempt < 12; attempt += 1) {
+      const code = generateAdPublicCode();
+      const { data, error } = await supabase
+        .from("ads")
+        .select("id")
+        .eq("public_code", code)
+        .maybeSingle();
+      if (error) throw error;
+      if (!data) return code;
+    }
+  }
+  return generateAdPublicCode();
+}
+
 // ---------- Ads ----------
 export async function listAds(): Promise<Ad[]> {
   if (supabaseEnabled && supabase) {
@@ -666,8 +685,10 @@ export async function createAd(
   input: AdInput,
 ): Promise<Ad> {
   const position = normalizeAdPosition(input.position) ?? (await getNextAdPosition());
+  const publicCode = input.public_code?.trim() || (await createUniqueAdPublicCode());
   const ad: Ad = {
     id: crypto.randomUUID(),
+    public_code: publicCode.toUpperCase(),
     title: input.title.trim() || "Novo anúncio",
     advertiser: input.advertiser?.trim() ?? "",
     screen_ids: input.screen_ids ?? [],
