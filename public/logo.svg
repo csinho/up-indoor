@@ -1,0 +1,80 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">Up Indoor mascot logo</title>
+  <desc id="desc">Friendly smart TV mascot with broadcast waves, campaign chart, play button, and purple blue gradient screen.</desc>
+  <defs>
+    <linearGradient id="screen" x1="260" y1="270" x2="760" y2="705" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0B1328"/>
+      <stop offset="0.48" stop-color="#182A63"/>
+      <stop offset="1" stop-color="#7C3AED"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="250" y1="135" x2="820" y2="850" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#7AA2FF"/>
+      <stop offset="0.52" stop-color="#8B5CF6"/>
+      <stop offset="1" stop-color="#C084FC"/>
+    </linearGradient>
+    <linearGradient id="body" x1="180" y1="210" x2="830" y2="820" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#26334F"/>
+      <stop offset="1" stop-color="#060B16"/>
+    </linearGradient>
+    <filter id="softShadow" x="72" y="102" width="880" height="834" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feFlood flood-opacity="0" result="BackgroundImageFix"/>
+      <feColorMatrix in="SourceAlpha" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 127 0" result="hardAlpha"/>
+      <feOffset dy="18"/>
+      <feGaussianBlur stdDeviation="18"/>
+      <feColorMatrix type="matrix" values="0 0 0 0 0.02 0 0 0 0 0.03 0 0 0 0 0.09 0 0 0 0.35 0"/>
+      <feBlend mode="normal" in2="BackgroundImageFix" result="effect1_dropShadow"/>
+      <feBlend mode="normal" in="SourceGraphic" in2="effect1_dropShadow" result="shape"/>
+    </filter>
+  </defs>
+
+  <g filter="url(#softShadow)">
+    <path d="M370 220L318 152" stroke="#111827" stroke-width="30" stroke-linecap="round"/>
+    <path d="M654 220L706 152" stroke="#111827" stroke-width="30" stroke-linecap="round"/>
+    <circle cx="309" cy="140" r="29" fill="#111827"/>
+    <circle cx="715" cy="140" r="29" fill="#111827"/>
+
+    <path d="M240 238H784C841.438 238 888 284.562 888 342V650C888 707.438 841.438 754 784 754H240C182.562 754 136 707.438 136 650V342C136 284.562 182.562 238 240 238Z" fill="url(#body)"/>
+    <path d="M240 238H784C841.438 238 888 284.562 888 342V650C888 707.438 841.438 754 784 754H240C182.562 754 136 707.438 136 650V342C136 284.562 182.562 238 240 238Z" stroke="#35405C" stroke-width="18"/>
+
+    <rect x="210" y="306" width="604" height="360" rx="64" fill="url(#screen)"/>
+    <rect x="210" y="306" width="604" height="360" rx="64" stroke="#050A14" stroke-width="18"/>
+    <path d="M251 366C395 302 581 304 773 382V344C773 327.431 759.569 314 743 314H281C264.431 314 251 327.431 251 344V366Z" fill="white" fill-opacity="0.09"/>
+
+    <ellipse cx="392" cy="454" rx="28" ry="47" fill="#FBF7FF"/>
+    <ellipse cx="632" cy="454" rx="28" ry="47" fill="#FBF7FF"/>
+    <path d="M342 385C358 369 382 369 398 385" stroke="#A78BFA" stroke-width="16" stroke-linecap="round"/>
+    <path d="M626 385C642 369 666 369 682 385" stroke="#A78BFA" stroke-width="16" stroke-linecap="round"/>
+    <path d="M455 534C483 570 542 572 570 534C578 523 570 510 557 512C526 516 498 516 468 512C455 510 447 523 455 534Z" fill="url(#accent)"/>
+
+    <rect x="292" y="574" width="96" height="64" rx="20" fill="url(#accent)"/>
+    <path d="M329 592L362 606L329 623V592Z" fill="#F4EDFF"/>
+    <rect x="424" y="584" width="160" height="16" rx="8" fill="#8B5CF6" fill-opacity="0.58"/>
+    <rect x="424" y="620" width="112" height="16" rx="8" fill="#8B5CF6" fill-opacity="0.45"/>
+
+    <rect x="624" y="570" width="36" height="82" rx="18" fill="url(#accent)"/>
+    <rect x="678" y="528" width="36" height="124" rx="18" fill="url(#accent)"/>
+    <rect x="732" y="480" width="36" height="172" rx="18" fill="url(#accent)"/>
+
+    <circle cx="718" cy="700" r="15" fill="#22C55E" stroke="#03130A" stroke-width="8"/>
+
+    <path d="M128 455C76 466 50 504 52 560" stroke="#111827" stroke-width="38" stroke-linecap="round"/>
+    <path d="M896 455C948 466 974 504 972 560" stroke="#111827" stroke-width="38" stroke-linecap="round"/>
+    <path d="M70 564C87 548 111 548 126 564" stroke="#111827" stroke-width="34" stroke-linecap="round"/>
+    <path d="M898 565C917 542 942 508 945 470" stroke="#111827" stroke-width="34" stroke-linecap="round"/>
+    <circle cx="898" cy="563" r="26" fill="#111827"/>
+    <path d="M87 540V586" stroke="url(#accent)" stroke-width="15" stroke-linecap="round"/>
+    <path d="M918 531L949 562" stroke="url(#accent)" stroke-width="15" stroke-linecap="round"/>
+
+    <rect x="354" y="742" width="58" height="116" rx="28" fill="#111827"/>
+    <rect x="612" y="742" width="58" height="116" rx="28" fill="#111827"/>
+    <path d="M318 854C318 821.967 343.967 796 376 796H420C452.033 796 478 821.967 478 854V861C478 875.912 465.912 888 451 888H345C330.088 888 318 875.912 318 861V854Z" fill="#111827"/>
+    <path d="M546 854C546 821.967 571.967 796 604 796H648C680.033 796 706 821.967 706 854V861C706 875.912 693.912 888 679 888H573C558.088 888 546 875.912 546 861V854Z" fill="#111827"/>
+    <path d="M332 870H464" stroke="url(#accent)" stroke-width="19" stroke-linecap="round"/>
+    <path d="M560 870H692" stroke="url(#accent)" stroke-width="19" stroke-linecap="round"/>
+
+    <path d="M247 130C205 162 180 211 180 264" stroke="url(#accent)" stroke-width="35" stroke-linecap="round"/>
+    <path d="M296 182C275 202 264 231 264 264" stroke="#6EA8FF" stroke-width="31" stroke-linecap="round"/>
+    <path d="M777 130C819 162 844 211 844 264" stroke="url(#accent)" stroke-width="35" stroke-linecap="round"/>
+    <path d="M728 182C749 202 760 231 760 264" stroke="#6EA8FF" stroke-width="31" stroke-linecap="round"/>
+  </g>
+</svg>

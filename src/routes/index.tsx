@@ -241,7 +241,7 @@ function Dashboard() {
 function BrandLogo({ className = "h-9 w-9" }: { className?: string }) {
   return (
     <img
-      src="/logo.png"
+      src="/logo.svg"
       alt="Midia Indoor"
       className={`rounded-xl object-cover shadow-glow ${className}`}
     />
