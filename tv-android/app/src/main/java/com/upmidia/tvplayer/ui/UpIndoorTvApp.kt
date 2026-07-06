@@ -60,6 +60,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -74,9 +76,7 @@ import com.upmidia.tvplayer.data.DeviceSessionStore
 import com.upmidia.tvplayer.data.TvBackendException
 import com.upmidia.tvplayer.data.TvManifestRepository
 import com.upmidia.tvplayer.model.TvDeviceSession
-import com.upmidia.tvplayer.model.TvDisplayMode
 import com.upmidia.tvplayer.model.TvLayoutRegion
-import com.upmidia.tvplayer.model.TvOrientation
 import com.upmidia.tvplayer.model.TvRegionItem
 import com.upmidia.tvplayer.model.TvRegionItemType
 import com.upmidia.tvplayer.model.TvRegionType
@@ -374,11 +374,7 @@ private fun TvPlayerRoute(
       message = current.message,
       onResetPairing = onResetPairing,
     )
-    is ManifestUiState.Ready -> PlayerScreen(
-      session = session,
-      manifest = current.manifest,
-      onResetPairing = onResetPairing,
-    )
+    is ManifestUiState.Ready -> PlayerScreen(manifest = current.manifest)
   }
 }
 
@@ -424,51 +420,11 @@ private fun ErrorState(
 }
 
 @Composable
-private fun PlayerScreen(
-  session: TvDeviceSession,
-  manifest: TvScreenManifest,
-  onResetPairing: () -> Unit,
-) {
+private fun PlayerScreen(manifest: TvScreenManifest) {
   Box(
     modifier = Modifier.fillMaxSize().background(Color.Black),
   ) {
     TvViewport(manifest = manifest)
-
-    Row(
-      modifier =
-        Modifier
-          .align(Alignment.TopStart)
-          .padding(18.dp)
-          .background(Color(0xAA020617), RoundedCornerShape(16.dp))
-          .padding(horizontal = 16.dp, vertical = 10.dp),
-      horizontalArrangement = Arrangement.spacedBy(12.dp),
-      verticalAlignment = Alignment.CenterVertically,
-    ) {
-      Text(
-        text = manifest.screenName,
-        color = Color.White,
-        fontWeight = FontWeight.SemiBold,
-      )
-      Text(
-        text = session.screenId.orEmpty(),
-        color = Color(0xFF94A3B8),
-      )
-      Text(
-        text = if (manifest.orientation == TvOrientation.LANDSCAPE) "Horizontal" else "Vertical",
-        color = Color(0xFF22D3EE),
-      )
-      Text(
-        text = getDisplayModeLabel(manifest.displayMode),
-        color = Color(0xFF94A3B8),
-      )
-    }
-
-    Button(
-      onClick = onResetPairing,
-      modifier = Modifier.align(Alignment.TopEnd).padding(18.dp),
-    ) {
-      Text("Resetar")
-    }
   }
 }
 
@@ -488,31 +444,38 @@ private fun TvViewport(manifest: TvScreenManifest) {
     return
   }
 
-  Box(
-    modifier =
-      Modifier
-        .fillMaxSize()
-        .background(Color.Black),
-    contentAlignment = Alignment.Center,
-  ) {
-    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-      Box(
-        modifier =
-          Modifier
-            .width(maxHeight)
-            .height(maxWidth)
-            .graphicsLayer {
-              rotationZ = layout.rotationDegrees
-              transformOrigin = TransformOrigin(0.5f, 0.5f)
-              clip = true
-            },
-      ) {
-        TvLayoutCanvas(
-          manifest = manifest,
-          shouldCropMedia = false,
-          modifier = Modifier.fillMaxSize(),
-        )
-      }
+  Layout(
+    content = {
+      TvLayoutCanvas(
+        manifest = manifest,
+        shouldCropMedia = false,
+        modifier = Modifier.fillMaxSize(),
+      )
+    },
+    modifier = Modifier.fillMaxSize().background(Color.Black),
+  ) { measurables, constraints ->
+    val viewportW = constraints.maxWidth
+    val viewportH = constraints.maxHeight
+    // Canvas retrato real (ex. 1080x1920). Nao usar BoxWithConstraints aqui:
+    // .height(viewportW) seria limitado a maxHeight (1080) e viraria quadrado.
+    val portraitW = viewportH
+    val portraitH = viewportW
+
+    val placeable =
+      measurables[0].measure(
+        Constraints.fixed(portraitW, portraitH),
+      )
+
+    layout(viewportW, viewportH) {
+      placeable.placeWithLayer(
+        x = (viewportW - portraitW) / 2,
+        y = (viewportH - portraitH) / 2,
+        layerBlock = {
+          rotationZ = layout.rotationDegrees
+          transformOrigin = TransformOrigin(0.5f, 0.5f)
+          clip = false
+        },
+      )
     }
   }
 }
@@ -791,15 +754,6 @@ private fun VideoRegionView(
       exoPlayer.clearVideoTextureView(textureView)
     },
   )
-}
-
-private fun getDisplayModeLabel(displayMode: TvDisplayMode): String {
-  return when (displayMode) {
-    TvDisplayMode.ROTATE_90 -> "Vertical 90"
-    TvDisplayMode.ROTATE_270 -> "Vertical 270"
-    TvDisplayMode.FILL -> "Tela cheia"
-    TvDisplayMode.NORMAL -> "Normal"
-  }
 }
 
 private fun resolvePlayableVideoUri(

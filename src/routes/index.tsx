@@ -475,17 +475,20 @@ function getDisplayModeLabel(mode: ScreenDisplayMode | undefined) {
   }
 }
 
-function getDisplayModeTransform(mode: ScreenDisplayMode | undefined) {
+function getDisplayModeTransform(
+  mode: ScreenDisplayMode | undefined,
+  orientation: Orientation = "landscape",
+) {
   switch (mode) {
     case "rotate_90":
       return "rotate(90deg)";
     case "rotate_270":
       return "rotate(-90deg)";
     case "fill":
-      return "scale(1.05)";
+      return orientation === "portrait" ? "rotate(90deg)" : "scale(1.05)";
     case "normal":
     default:
-      return "none";
+      return orientation === "portrait" ? "rotate(90deg)" : "none";
   }
 }
 
@@ -525,8 +528,9 @@ function ScreenDisplayPreview({
 }) {
   const isRotated = displayMode === "rotate_90" || displayMode === "rotate_270";
   const isPortraitAsset = orientation === "portrait";
-  const innerWidth = isRotated ? "56.25%" : isPortraitAsset ? "44%" : "74%";
-  const innerHeight = isRotated ? "100%" : isPortraitAsset ? "76%" : "42%";
+  const showRotatedPortrait = isRotated || isPortraitAsset;
+  const innerWidth = showRotatedPortrait ? "56.25%" : "74%";
+  const innerHeight = showRotatedPortrait ? "177.78%" : "42%";
 
   return (
     <div
@@ -539,7 +543,7 @@ function ScreenDisplayPreview({
         style={{
           width: innerWidth,
           height: innerHeight,
-          transform: `translate(-50%, -50%) ${getDisplayModeTransform(displayMode)}`,
+          transform: `translate(-50%, -50%) ${getDisplayModeTransform(displayMode, orientation)}`,
         }}
       >
         <div className="absolute inset-2 rounded-lg border border-white/15" />

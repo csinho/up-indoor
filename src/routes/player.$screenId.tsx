@@ -111,8 +111,10 @@ function DisplayViewport({
     return (
       <div className="relative h-full w-full overflow-hidden bg-black">
         <div
-          className="absolute left-1/2 top-1/2 h-full w-[56.25%] max-w-none"
+          className="absolute left-1/2 top-1/2 max-w-none"
           style={{
+            width: "56.25%",
+            height: "177.78%",
             transform: `translate(-50%, -50%) rotate(${rotation})`,
           }}
         >
