@@ -1,6 +1,7 @@
 import {
   Building2,
   LayoutDashboard,
+  Layers,
   Store,
   Tv,
 } from "lucide-react";
@@ -11,6 +12,7 @@ export type DashboardTab =
   | "overview"
   | "stores"
   | "screens"
+  | "layouts"
   | "companies";
 
 const NAV_ITEMS: Array<{
@@ -21,6 +23,7 @@ const NAV_ITEMS: Array<{
   { value: "overview", label: "Início", icon: LayoutDashboard },
   { value: "stores", label: "Pontos", icon: Store },
   { value: "screens", label: "TVs", icon: Tv },
+  { value: "layouts", label: "Layouts", icon: Layers },
   { value: "companies", label: "Empresas", icon: Building2 },
 ];
 

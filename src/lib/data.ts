@@ -17,6 +17,11 @@ import type {
   TvDevice,
 } from "./types";
 import { isAdRunningNow, sortAdsForPlayback } from "./ad-utils";
+import { filterAdsForScreen } from "./ad-targeting";
+import {
+  buildPlayerManifestRegions,
+  type PlayerManifestRegion,
+} from "./player-manifest";
 import { generateAdPublicCode } from "./ad-public-code";
 import { functionsUrl, supabase, supabaseEnabled } from "./supabase";
 
@@ -757,17 +762,96 @@ export async function deleteAd(id: string): Promise<void> {
   writeLocal(db);
 }
 
-export async function getPlayerData(screenId: string) {
-  const [screens, ads] = await Promise.all([listScreens(), listAds()]);
-  const screen = screens.find((s) => s.id === screenId && s.active);
-  if (!screen) return { screen: null, ads: [] as Ad[] };
-  const running = ads.filter(
+export async function getPlayerManifest(screenId: string): Promise<{
+  screen: Screen | null;
+  regions: PlayerManifestRegion[];
+  ads: Ad[];
+}> {
+  if (supabaseEnabled && supabase) {
+    const { data: screenRow, error: screenError } = await supabase
+      .from("screens")
+      .select(
+        "*, stores(category_id)",
+      )
+      .eq("id", screenId)
+      .maybeSingle();
+
+    if (screenError) throw screenError;
+
+    if (!screenRow || !screenRow.active) {
+      return { screen: null, regions: [], ads: [] };
+    }
+
+    const screen = screenRow as Screen & {
+      stores?: { category_id: string | null } | null;
+    };
+    const storeCategoryId = screen.stores?.category_id ?? null;
+
+    const { data: companyLinks, error: companyLinksError } = await supabase
+      .from("company_screens")
+      .select("company_id")
+      .eq("screen_id", screenId);
+
+    if (companyLinksError) throw companyLinksError;
+
+    const linkedCompanyIds = new Set(
+      (companyLinks ?? []).map((link) => String(link.company_id)),
+    );
+
+    const { data: adsData, error: adsError } = await supabase
+      .from("ads")
+      .select(
+        "*, companies(category_id, billing_status, active)",
+      );
+
+    if (adsError) throw adsError;
+
+    const activeAds = filterAdsForScreen(
+      adsData ?? [],
+      screenId,
+      storeCategoryId,
+      linkedCompanyIds,
+      screen.orientation ?? "landscape",
+    );
+
+    let layout: LayoutTemplate | null = null;
+    if (screen.layout_template_id) {
+      const layouts = await listLayoutTemplates();
+      layout =
+        layouts.find((template) => template.id === screen.layout_template_id) ??
+        null;
+    }
+
+    const regions = buildPlayerManifestRegions(screen, layout, activeAds);
+
+    return { screen, regions, ads: activeAds };
+  }
+
+  const db = readLocal();
+  const screen = db.screens.find((entry) => entry.id === screenId && entry.active);
+  if (!screen) return { screen: null, regions: [], ads: [] };
+
+  const running = db.ads.filter(
     (ad) =>
       ad.screen_ids.includes(screenId) &&
-      isAdRunningNow(ad) &&
       (ad.type === "image" || ad.type === "video"),
   );
-  return { screen, ads: sortAdsForPlayback(running) };
+  const ads = sortAdsForPlayback(running);
+  const layout =
+    db.layoutTemplates.find(
+      (template) => template.id === screen.layout_template_id,
+    ) ?? null;
+
+  return {
+    screen,
+    regions: buildPlayerManifestRegions(screen, layout, ads),
+    ads,
+  };
+}
+
+export async function getPlayerData(screenId: string) {
+  const { screen, ads, regions } = await getPlayerManifest(screenId);
+  return { screen, ads, regions };
 }
 
 // ---------- TV pairing ----------
@@ -1077,4 +1161,102 @@ export async function syncScreenCompanies(
       .filter((companyId) => !desired.has(companyId))
       .map((companyId) => removeScreenFromCompany(companyId, screenId)),
   );
+}
+
+// ---------- Playback analytics ----------
+export interface PlaybackFailureLog {
+  id: string;
+  screen_id: string | null;
+  ad_id: string | null;
+  message: string;
+  created_at: string;
+}
+
+export interface PlaybackAnalyticsSummary {
+  impressions7d: number;
+  playbacksStarted7d: number;
+  failures7d: number;
+  topAds: Array<{ adId: string; title: string; impressions: number }>;
+  recentFailures: PlaybackFailureLog[];
+}
+
+export async function getPlaybackAnalyticsSummary(
+  ads: Ad[],
+): Promise<PlaybackAnalyticsSummary> {
+  const empty: PlaybackAnalyticsSummary = {
+    impressions7d: 0,
+    playbacksStarted7d: 0,
+    failures7d: 0,
+    topAds: [],
+    recentFailures: [],
+  };
+
+  if (!supabaseEnabled || !supabase) return empty;
+
+  const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+  const { data, error } = await supabase
+    .from("tv_playback_logs")
+    .select("id, screen_id, ad_id, event_type, message, meta, created_at")
+    .gte("created_at", since)
+    .order("created_at", { ascending: false })
+    .limit(1000);
+
+  if (error) throw error;
+
+  const rows = data ?? [];
+  const adsById = new Map(ads.map((ad) => [ad.id, ad.title]));
+  const impressionsByAd = new Map<string, number>();
+
+  let impressions7d = 0;
+  let playbacksStarted7d = 0;
+  let failures7d = 0;
+
+  for (const row of rows) {
+    const eventType = String(row.event_type);
+    if (eventType === "started") {
+      playbacksStarted7d += 1;
+    }
+    if (eventType === "failed") {
+      failures7d += 1;
+    }
+    if (eventType === "completed" && row.ad_id) {
+      const meta = (row.meta ?? {}) as { durationSeconds?: number };
+      const durationSeconds = Number(meta.durationSeconds ?? 0);
+      if (durationSeconds >= 3 || durationSeconds === 0) {
+        impressions7d += 1;
+        impressionsByAd.set(
+          row.ad_id,
+          (impressionsByAd.get(row.ad_id) ?? 0) + 1,
+        );
+      }
+    }
+  }
+
+  const topAds = [...impressionsByAd.entries()]
+    .sort((left, right) => right[1] - left[1])
+    .slice(0, 5)
+    .map(([adId, impressions]) => ({
+      adId,
+      title: adsById.get(adId) ?? adId,
+      impressions,
+    }));
+
+  const recentFailures = rows
+    .filter((row) => row.event_type === "failed")
+    .slice(0, 5)
+    .map((row) => ({
+      id: String(row.id),
+      screen_id: row.screen_id ? String(row.screen_id) : null,
+      ad_id: row.ad_id ? String(row.ad_id) : null,
+      message: String(row.message ?? ""),
+      created_at: String(row.created_at),
+    }));
+
+  return {
+    impressions7d,
+    playbacksStarted7d,
+    failures7d,
+    topAds,
+    recentFailures,
+  };
 }

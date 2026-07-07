@@ -1,8 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { getPlayerData } from "@/lib/data";
-import type { Ad, ScreenDisplayMode } from "@/lib/types";
+import { logPlaybackEvent } from "@/lib/playback-analytics";
+import type { PlayerManifestItem, PlayerManifestRegion } from "@/lib/player-manifest";
+import type { ScreenDisplayMode } from "@/lib/types";
 
 export const Route = createFileRoute("/player/$screenId")({
   ssr: false,
@@ -17,31 +19,12 @@ function PlayerPage() {
     refetchInterval: 30_000,
   });
 
-  const [turn, setTurn] = useState(0);
-  const ads = q.data?.ads ?? [];
   const screen = q.data?.screen;
-  const playlistSignature = ads.map((ad) => ad.id).join("|");
-  const currentIndex = ads.length > 0 ? turn % ads.length : 0;
-  const current = ads[currentIndex];
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => {
-    if (timerRef.current) clearTimeout(timerRef.current);
-    if (!current) return;
-
-    timerRef.current = setTimeout(() => {
-      setTurn((value) => value + 1);
-    }, current.duration * 1000);
-
-    return () => {
-      if (timerRef.current) clearTimeout(timerRef.current);
-    };
-  }, [current, turn]);
-
-  // Reset the rotation counter when the playlist changes.
-  useEffect(() => {
-    setTurn(0);
-  }, [screenId, playlistSignature]);
+  const regions = q.data?.regions ?? [];
+  const ads = q.data?.ads ?? [];
+  const hasMedia = regions.some((region) =>
+    region.items.some((item) => item.type === "image" || item.type === "video"),
+  );
 
   if (q.isLoading) {
     return (
@@ -65,7 +48,7 @@ function PlayerPage() {
     );
   }
 
-  if (ads.length === 0) {
+  if (ads.length === 0 || !hasMedia) {
     return (
       <FullScreen>
         <div className="text-center text-white">
@@ -80,10 +63,12 @@ function PlayerPage() {
 
   return (
     <FullScreen>
-      <DisplayViewport
+      <LayoutPlayer
+        screenId={screenId}
         displayMode={screen.display_mode ?? "normal"}
-        ad={current}
-        isSingleAd={ads.length === 1}
+        canvasWidth={screen.resolution_width ?? 1920}
+        canvasHeight={screen.resolution_height ?? 1080}
+        regions={regions}
       />
     </FullScreen>
   );
@@ -97,15 +82,41 @@ function FullScreen({ children }: { children: React.ReactNode }) {
   );
 }
 
-function DisplayViewport({
+function LayoutPlayer({
+  screenId,
   displayMode,
-  ad,
-  isSingleAd,
+  canvasWidth,
+  canvasHeight,
+  regions,
 }: {
+  screenId: string;
   displayMode: ScreenDisplayMode;
-  ad: Ad;
-  isSingleAd: boolean;
+  canvasWidth: number;
+  canvasHeight: number;
+  regions: PlayerManifestRegion[];
 }) {
+  const sortedRegions = useMemo(
+    () => [...regions].sort((left, right) => left.zIndex - right.zIndex),
+    [regions],
+  );
+
+  const content = (
+    <div
+      className="relative h-full w-full overflow-hidden bg-black"
+      style={{ aspectRatio: `${canvasWidth} / ${canvasHeight}` }}
+    >
+      {sortedRegions.map((region) => (
+        <RegionLayer
+          key={region.id}
+          screenId={screenId}
+          region={region}
+          canvasWidth={canvasWidth}
+          canvasHeight={canvasHeight}
+        />
+      ))}
+    </div>
+  );
+
   if (displayMode === "rotate_90" || displayMode === "rotate_270") {
     const rotation = displayMode === "rotate_90" ? "90deg" : "-90deg";
     return (
@@ -118,50 +129,174 @@ function DisplayViewport({
             transform: `translate(-50%, -50%) rotate(${rotation})`,
           }}
         >
-          <MediaFrame ad={ad} isSingleAd={isSingleAd} fillScreen={false} />
+          {content}
         </div>
       </div>
     );
   }
 
+  return <div className="h-full w-full">{content}</div>;
+}
+
+function RegionLayer({
+  screenId,
+  region,
+  canvasWidth,
+  canvasHeight,
+}: {
+  screenId: string;
+  region: PlayerManifestRegion;
+  canvasWidth: number;
+  canvasHeight: number;
+}) {
+  const playableItems = region.items.filter(
+    (item) => item.type === "image" || item.type === "video",
+  );
+  const [turn, setTurn] = useState(0);
+  const current =
+    playableItems.length > 0 ? playableItems[turn % playableItems.length] : null;
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const signature = playableItems.map((item) => item.id).join("|");
+  const previousItemRef = useRef<PlayerManifestItem | null>(null);
+
+  useEffect(() => {
+    setTurn(0);
+  }, [signature]);
+
+  useEffect(() => {
+    if (!current) return;
+
+    if (previousItemRef.current?.id !== current.id) {
+      void logPlaybackEvent({
+        screenId,
+        adId: current.id,
+        eventType: "started",
+        meta: { itemType: current.type, title: current.title },
+      });
+      previousItemRef.current = current;
+    }
+  }, [current, screenId]);
+
+  useEffect(() => {
+    if (timerRef.current) clearTimeout(timerRef.current);
+    if (!current) return;
+
+    if (playableItems.length <= 1) return;
+
+    timerRef.current = setTimeout(() => {
+      void logPlaybackEvent({
+        screenId,
+        adId: current.id,
+        eventType: "completed",
+        meta: {
+          itemType: current.type,
+          title: current.title,
+          durationSeconds: current.duration,
+        },
+      });
+      setTurn((value) => value + 1);
+    }, current.duration * 1000);
+
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, [current, playableItems.length, screenId, turn]);
+
+  const style = {
+    left: `${(region.x / canvasWidth) * 100}%`,
+    top: `${(region.y / canvasHeight) * 100}%`,
+    width: `${(region.width / canvasWidth) * 100}%`,
+    height: `${(region.height / canvasHeight) * 100}%`,
+    zIndex: region.zIndex,
+    background: region.background === "transparent" ? undefined : region.background,
+  };
+
+  if (region.type === "banner" || region.items.some((item) => item.type === "banner")) {
+    const banner = region.items.find((item) => item.type === "banner");
+    return (
+      <div className="absolute overflow-hidden" style={style}>
+        <BannerFrame item={banner ?? region.items[0]} />
+      </div>
+    );
+  }
+
+  if (!current) return null;
+
   return (
-    <div className="h-full w-full">
+    <div className="absolute overflow-hidden" style={style}>
       <MediaFrame
-        ad={ad}
-        isSingleAd={isSingleAd}
-        fillScreen={displayMode === "fill"}
+        screenId={screenId}
+        item={current}
+        fillScreen
       />
     </div>
   );
 }
 
+function BannerFrame({ item }: { item: PlayerManifestItem }) {
+  return (
+    <div
+      className="flex h-full w-full items-center justify-center px-4 text-center text-lg font-semibold"
+      style={{
+        background: item.background ?? "#111827",
+        color: item.textColor ?? "#ffffff",
+      }}
+    >
+      {item.bannerText || item.title}
+    </div>
+  );
+}
+
 function MediaFrame({
-  ad,
-  isSingleAd,
+  screenId,
+  item,
   fillScreen,
 }: {
-  ad: Ad;
-  isSingleAd: boolean;
+  screenId: string;
+  item: PlayerManifestItem;
   fillScreen: boolean;
 }) {
-  if (ad.type === "video") {
+  if (item.type === "video" && item.source) {
     return (
       <video
         className={`h-full w-full ${fillScreen ? "object-cover" : "object-contain"}`}
-        src={ad.source}
+        src={item.source}
         autoPlay
         muted
         loop
         preload="auto"
         playsInline
+        onError={() => {
+          void logPlaybackEvent({
+            screenId,
+            adId: item.id,
+            eventType: "failed",
+            message: "falha ao carregar video",
+            meta: { itemType: item.type, title: item.title },
+          });
+        }}
       />
     );
   }
+
+  if (!item.source) {
+    return <div className="h-full w-full bg-muted" />;
+  }
+
   return (
     <img
-      src={ad.source}
-      alt={ad.title}
+      src={item.source}
+      alt={item.title}
       className={`h-full w-full ${fillScreen ? "object-cover" : "object-contain"}`}
+      onError={() => {
+        void logPlaybackEvent({
+          screenId,
+          adId: item.id,
+          eventType: "failed",
+          message: "falha ao carregar imagem",
+          meta: { itemType: item.type, title: item.title },
+        });
+      }}
     />
   );
 }

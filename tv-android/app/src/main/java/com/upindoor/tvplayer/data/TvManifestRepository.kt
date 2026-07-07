@@ -76,17 +76,25 @@ class TvManifestRepository {
   }
 
   suspend fun syncDeviceAndLoadManifest(session: TvDeviceSession): TvScreenManifest {
+    return parseManifest(syncDeviceAndFetchManifestJson(session))
+  }
+
+  suspend fun syncDeviceAndFetchManifestJson(session: TvDeviceSession): JSONObject {
     return withContext(Dispatchers.IO) {
       val baseUrl = normalizeBaseUrl(session.apiBaseUrl)
       registerDevice(baseUrl, session)
-      fetchManifest(baseUrl, session.deviceCode)
+      fetchManifestJson(baseUrl, session.deviceCode)
     }
   }
 
   suspend fun loadManifest(session: TvDeviceSession): TvScreenManifest {
+    return parseManifest(fetchManifestJson(session))
+  }
+
+  suspend fun fetchManifestJson(session: TvDeviceSession): JSONObject {
     return withContext(Dispatchers.IO) {
       val baseUrl = normalizeBaseUrl(session.apiBaseUrl)
-      fetchManifest(baseUrl, session.deviceCode)
+      fetchManifestJson(baseUrl, session.deviceCode)
     }
   }
 
@@ -117,6 +125,32 @@ class TvManifestRepository {
     }
   }
 
+  suspend fun logPlayback(
+    session: TvDeviceSession,
+    screenId: String,
+    adId: String,
+    eventType: String,
+    message: String = "",
+    meta: JSONObject? = null,
+  ) {
+    return withContext(Dispatchers.IO) {
+      val baseUrl = normalizeBaseUrl(session.apiBaseUrl)
+      val payload =
+        JSONObject()
+          .put("deviceCode", session.deviceCode)
+          .put("screenId", screenId)
+          .put("adId", adId)
+          .put("eventType", eventType)
+          .put("message", message)
+
+      if (meta != null) {
+        payload.put("meta", meta)
+      }
+
+      postJson("$baseUrl/functions/v1/tv-log-playback", payload)
+    }
+  }
+
   private fun registerDevice(baseUrl: String, session: TvDeviceSession) {
     val payload =
       JSONObject()
@@ -130,10 +164,9 @@ class TvManifestRepository {
     postJson("$baseUrl/functions/v1/tv-register-device", payload)
   }
 
-  private fun fetchManifest(baseUrl: String, deviceCode: String): TvScreenManifest {
+  private fun fetchManifestJson(baseUrl: String, deviceCode: String): JSONObject {
     val payload = JSONObject().put("deviceCode", deviceCode)
-    val json = postJson("$baseUrl/functions/v1/tv-player-manifest", payload)
-    return parseManifest(json)
+    return postJson("$baseUrl/functions/v1/tv-player-manifest", payload)
   }
 
   private fun postJson(url: String, body: JSONObject): JSONObject {
@@ -178,7 +211,7 @@ class TvManifestRepository {
     return json
   }
 
-  private fun parseManifest(json: JSONObject): TvScreenManifest {
+  fun parseManifest(json: JSONObject): TvScreenManifest {
     return TvScreenManifest(
       screenId = json.getString("screenId"),
       screenName = json.optString("screenName", json.getString("screenId")),

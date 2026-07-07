@@ -7,24 +7,38 @@ Base inicial do app nativo para `Android TV / Google TV`.
 - launcher para TV com `LEANBACK_LAUNCHER`
 - UI nativa com `Jetpack Compose`
 - player shell com `Media3 / ExoPlayer`
-- fluxo inicial de ativacao da TV
-- armazenamento local simples da sessao do dispositivo
-- manifesto demo em memoria para simular `layout + regioes + banners`
+- fluxo de ativacao e pareamento por QR
+- manifesto real via Supabase (`tv-player-manifest`)
+- **cache offline**: manifesto JSON + midias em disco para playback sem internet
+
+## Cache offline (Epico 1)
+
+- `ManifestCacheStore`: persiste o JSON do manifesto por `screenId`
+- `MediaCacheManager`: baixa imagens/videos para `filesDir/up-indoor/media/`
+- `TvPlaybackCache`: orquestra fetch online, prefetch e fallback offline
+- Badge **"Offline — ultima sync HH:MM"** quando a rede cai
+
+A TV continua passando campanha apos uma sync bem-sucedida, mesmo sem internet.
+
+## Telemetria (Epico 6)
+
+- `PlaybackAnalytics`: envia eventos `started`, `completed` e `failed` para `tv-log-playback`
+- Logs gravados em `tv_playback_logs` no Supabase
+- Dashboard exibe impressoes, reproducoes e falhas dos ultimos 7 dias
 
 ## Estrutura
 
 - `app/src/main/java/com/upindoor/tvplayer/MainActivity.kt`: entrypoint
-- `app/src/main/java/com/upindoor/tvplayer/data`: sessao local e manifesto demo
+- `app/src/main/java/com/upindoor/tvplayer/data`: sessao, manifesto, cache offline
 - `app/src/main/java/com/upindoor/tvplayer/model`: contratos do manifesto da TV
 - `app/src/main/java/com/upindoor/tvplayer/ui`: telas de ativacao e player
 
 ## Proximos passos esperados
 
-1. trocar o manifesto demo por chamadas reais ao backend
-2. implementar pareamento real por QR code / activation code
-3. adicionar cache local de midias
-4. suportar imagens e YouTube de forma nativa alem de videos Media3
-5. telemetria, heartbeat e recuperacao automatica
+1. alertas de TV offline (Epico 5)
+2. widgets dinamicos em layouts (Epico 2 — revisar UX de layouts antes)
+3. YouTube e links no player (Epico 4)
+4. player Windows / Smart TV (Epico 3)
 
 ## Como abrir
 

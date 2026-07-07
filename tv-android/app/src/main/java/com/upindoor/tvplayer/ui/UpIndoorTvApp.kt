@@ -81,6 +81,8 @@ import com.upindoor.tvplayer.data.BackendConfig
 import com.upindoor.tvplayer.data.DeviceSessionStore
 import com.upindoor.tvplayer.data.TvBackendException
 import com.upindoor.tvplayer.data.TvManifestRepository
+import com.upindoor.tvplayer.data.PlaybackAnalytics
+import com.upindoor.tvplayer.data.TvPlaybackCache
 import com.upindoor.tvplayer.model.TvDeviceSession
 import com.upindoor.tvplayer.model.TvLayoutRegion
 import com.upindoor.tvplayer.model.TvRegionItem
@@ -94,6 +96,9 @@ import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLDecoder
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 private const val MANIFEST_REFRESH_INTERVAL_MS = 15_000L
 
@@ -140,7 +145,11 @@ fun UpIndoorTvApp() {
 private sealed interface ManifestUiState {
   data object Loading : ManifestUiState
 
-  data class Ready(val manifest: TvScreenManifest) : ManifestUiState
+  data class Ready(
+    val manifest: TvScreenManifest,
+    val isOffline: Boolean = false,
+    val lastSyncedAt: Long? = null,
+  ) : ManifestUiState
 
   data class Error(val message: String) : ManifestUiState
 }
@@ -301,8 +310,10 @@ private fun TvPlayerRoute(
   session: TvDeviceSession,
   onResetPairing: () -> Unit,
 ) {
-  val activity = LocalContext.current as? ComponentActivity
-  val repository = remember { TvManifestRepository() }
+  val context = LocalContext.current
+  val activity = context as? ComponentActivity
+  val playbackCache = remember(context) { TvPlaybackCache(context) }
+  val playbackAnalytics = remember { PlaybackAnalytics() }
   var state by remember(session.screenId, session.apiBaseUrl) {
     mutableStateOf<ManifestUiState>(ManifestUiState.Loading)
   }
@@ -342,29 +353,49 @@ private fun TvPlayerRoute(
     while (true) {
       val result =
         runCatching {
-          if (deviceRegistered) {
-            repository.loadManifest(session)
-          } else {
-            repository.syncDeviceAndLoadManifest(session)
-          }
+          playbackCache.loadManifest(
+            session = session,
+            registerDevice = !deviceRegistered,
+          )
         }
 
       result
-        .onSuccess { manifest ->
+        .onSuccess { loadResult ->
           deviceRegistered = true
 
           val current = state
           state =
             if (current is ManifestUiState.Ready &&
-              current.manifest.playlistVersion == manifest.playlistVersion
+              current.manifest.playlistVersion == loadResult.manifest.playlistVersion &&
+              !loadResult.isOffline
             ) {
-              if (current.manifest == manifest) current else ManifestUiState.Ready(manifest)
+              current.copy(
+                manifest = loadResult.manifest,
+                isOffline = false,
+                lastSyncedAt = loadResult.lastSyncedAt,
+              )
             } else {
-              ManifestUiState.Ready(manifest)
+              ManifestUiState.Ready(
+                manifest = loadResult.manifest,
+                isOffline = loadResult.isOffline,
+                lastSyncedAt = loadResult.lastSyncedAt,
+              )
             }
         }.onFailure { error ->
-          if (shouldStopPlaybackForError(error) || state !is ManifestUiState.Ready) {
+          if (shouldStopPlaybackForError(error)) {
             state = ManifestUiState.Error(error.message ?: "Falha ao carregar manifesto")
+          } else {
+            val fallback = playbackCache.loadCachedOnly(session)
+            if (fallback != null) {
+              state =
+                ManifestUiState.Ready(
+                  manifest = fallback.manifest,
+                  isOffline = true,
+                  lastSyncedAt = fallback.lastSyncedAt,
+                )
+            } else if (state !is ManifestUiState.Ready) {
+              state = ManifestUiState.Error(error.message ?: "Falha ao carregar manifesto")
+            }
           }
         }
 
@@ -380,7 +411,14 @@ private fun TvPlayerRoute(
     )
     is ManifestUiState.Ready ->
       if (appInForeground) {
-        PlayerScreen(manifest = current.manifest)
+        PlayerScreen(
+          session = session,
+          manifest = current.manifest,
+          playbackCache = playbackCache,
+          playbackAnalytics = playbackAnalytics,
+          isOffline = current.isOffline,
+          lastSyncedAt = current.lastSyncedAt,
+        )
       } else {
         Box(
           modifier = Modifier.fillMaxSize().background(Color.Black),
@@ -431,36 +469,105 @@ private fun ErrorState(
 }
 
 @Composable
-private fun PlayerScreen(manifest: TvScreenManifest) {
+private fun PlayerScreen(
+  session: TvDeviceSession,
+  manifest: TvScreenManifest,
+  playbackCache: TvPlaybackCache,
+  playbackAnalytics: PlaybackAnalytics,
+  isOffline: Boolean,
+  lastSyncedAt: Long?,
+) {
   Box(
     modifier = Modifier.fillMaxSize().background(Color.Black),
   ) {
-    TvViewport(manifest = manifest)
+    TvViewport(
+      session = session,
+      manifest = manifest,
+      playbackCache = playbackCache,
+      playbackAnalytics = playbackAnalytics,
+      isOffline = isOffline,
+      lastSyncedAt = lastSyncedAt,
+    )
   }
 }
 
 @Composable
-private fun TvViewport(manifest: TvScreenManifest) {
+private fun OfflineBadge(lastSyncedAt: Long?) {
+  val label =
+    remember(lastSyncedAt) {
+      val time =
+        lastSyncedAt?.let { syncedAt ->
+          SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(syncedAt))
+        }
+      if (time != null) {
+        "Offline — ultima sync $time"
+      } else {
+        "Offline — usando cache local"
+      }
+    }
+
+  Box(
+    modifier =
+      Modifier
+        .fillMaxSize()
+        .padding(20.dp),
+    contentAlignment = Alignment.TopEnd,
+  ) {
+    Text(
+      text = label,
+      color = Color(0xFFFDE68A),
+      fontSize = 14.sp,
+      modifier =
+        Modifier
+          .background(Color(0xCC111827), RoundedCornerShape(8.dp))
+          .padding(horizontal = 12.dp, vertical = 8.dp),
+    )
+  }
+}
+
+@Composable
+private fun TvViewport(
+  session: TvDeviceSession,
+  manifest: TvScreenManifest,
+  playbackCache: TvPlaybackCache,
+  playbackAnalytics: PlaybackAnalytics,
+  isOffline: Boolean = false,
+  lastSyncedAt: Long? = null,
+) {
   val layout =
     remember(manifest.orientation, manifest.displayMode) {
       resolveTvContentLayout(manifest)
     }
 
+  @Composable
+  fun ContentSurface(
+    modifier: Modifier = Modifier,
+    shouldCropMedia: Boolean = layout.shouldCropMedia,
+  ) {
+    Box(modifier = modifier.fillMaxSize()) {
+      TvLayoutCanvas(
+        manifest = manifest,
+        session = session,
+        playbackCache = playbackCache,
+        playbackAnalytics = playbackAnalytics,
+        shouldCropMedia = shouldCropMedia,
+        modifier = Modifier.fillMaxSize(),
+      )
+      if (isOffline) {
+        OfflineBadge(lastSyncedAt = lastSyncedAt)
+      }
+    }
+  }
+
   if (!layout.usePortraitCanvas || layout.rotationDegrees == 0f) {
-    TvLayoutCanvas(
-      manifest = manifest,
-      shouldCropMedia = layout.shouldCropMedia,
-      modifier = Modifier.fillMaxSize(),
-    )
+    ContentSurface()
     return
   }
 
   Layout(
     content = {
-      TvLayoutCanvas(
-        manifest = manifest,
+      ContentSurface(
         shouldCropMedia = false,
-        modifier = Modifier.fillMaxSize(),
       )
     },
     modifier = Modifier.fillMaxSize().background(Color.Black),
@@ -494,6 +601,9 @@ private fun TvViewport(manifest: TvScreenManifest) {
 @Composable
 private fun TvLayoutCanvas(
   manifest: TvScreenManifest,
+  session: TvDeviceSession,
+  playbackCache: TvPlaybackCache,
+  playbackAnalytics: PlaybackAnalytics,
   shouldCropMedia: Boolean,
   modifier: Modifier = Modifier,
 ) {
@@ -518,6 +628,10 @@ private fun TvLayoutCanvas(
       ) {
         RegionLayer(
           region = region,
+          screenId = manifest.screenId,
+          session = session,
+          playbackCache = playbackCache,
+          playbackAnalytics = playbackAnalytics,
           shouldCropMedia = shouldCropMedia,
         )
       }
@@ -528,6 +642,10 @@ private fun TvLayoutCanvas(
 @Composable
 private fun RegionLayer(
   region: TvLayoutRegion,
+  screenId: String,
+  session: TvDeviceSession,
+  playbackCache: TvPlaybackCache,
+  playbackAnalytics: PlaybackAnalytics,
   shouldCropMedia: Boolean,
 ) {
   val items = remember(region.items) { region.items.ifEmpty { listOf() } }
@@ -535,13 +653,35 @@ private fun RegionLayer(
   val currentItem = items.getOrNull(currentIndex)
 
   LaunchedEffect(region.id, items) {
-    if (items.size <= 1) return@LaunchedEffect
+    if (items.isEmpty()) return@LaunchedEffect
 
     currentIndex = 0
+    playbackAnalytics.logEvent(
+      session = session,
+      screenId = screenId,
+      item = items[0],
+      eventType = "started",
+    )
+
+    if (items.size <= 1) return@LaunchedEffect
+
     while (true) {
       val item = items[currentIndex]
       delay(item.durationSeconds * 1000L)
+      playbackAnalytics.logEvent(
+        session = session,
+        screenId = screenId,
+        item = item,
+        eventType = "completed",
+        meta = mapOf("durationSeconds" to item.durationSeconds),
+      )
       currentIndex = (currentIndex + 1) % items.size
+      playbackAnalytics.logEvent(
+        session = session,
+        screenId = screenId,
+        item = items[currentIndex],
+        eventType = "started",
+      )
     }
   }
 
@@ -563,6 +703,10 @@ private fun RegionLayer(
     currentItem.type == TvRegionItemType.IMAGE && !currentItem.source.isNullOrBlank() -> {
       ImageRegionView(
         item = currentItem,
+        screenId = screenId,
+        session = session,
+        playbackCache = playbackCache,
+        playbackAnalytics = playbackAnalytics,
         shouldCropMedia = shouldCropMedia,
       )
     }
@@ -570,6 +714,10 @@ private fun RegionLayer(
     currentItem.type == TvRegionItemType.VIDEO && !currentItem.source.isNullOrBlank() -> {
       VideoRegionView(
         item = currentItem,
+        screenId = screenId,
+        session = session,
+        playbackCache = playbackCache,
+        playbackAnalytics = playbackAnalytics,
         shouldCropMedia = shouldCropMedia,
       )
     }
@@ -646,17 +794,40 @@ private fun MediaPlaceholderView(item: TvRegionItem) {
 @Composable
 private fun ImageRegionView(
   item: TvRegionItem,
+  screenId: String,
+  session: TvDeviceSession,
+  playbackCache: TvPlaybackCache,
+  playbackAnalytics: PlaybackAnalytics,
   shouldCropMedia: Boolean,
 ) {
   val imageResult by produceState(
     initialValue = ImageLoadResult(bitmap = null),
     key1 = item.id,
     key2 = item.source,
+    key3 = screenId,
   ) {
     value =
       withContext(Dispatchers.IO) {
-        loadImageBitmap(item.source)
+        loadImageBitmap(
+          screenId = screenId,
+          itemId = item.id,
+          source = item.source,
+          playbackCache = playbackCache,
+        )
       }
+  }
+
+  LaunchedEffect(imageResult.error, item.id) {
+    val errorMessage = imageResult.error
+    if (errorMessage != null) {
+      playbackAnalytics.logEvent(
+        session = session,
+        screenId = screenId,
+        item = item,
+        eventType = "failed",
+        message = errorMessage,
+      )
+    }
   }
 
   if (imageResult.bitmap == null) {
@@ -682,14 +853,28 @@ private fun ImageRegionView(
 @Composable
 private fun VideoRegionView(
   item: TvRegionItem,
+  screenId: String,
+  session: TvDeviceSession,
+  playbackCache: TvPlaybackCache,
+  playbackAnalytics: PlaybackAnalytics,
   shouldCropMedia: Boolean,
 ) {
   val context = LocalContext.current
   var playbackError by remember(item.id, item.source) { mutableStateOf<String?>(null) }
-  val mediaUri by produceState<Uri?>(initialValue = null, key1 = item.id, key2 = item.source) {
+  val mediaUri by produceState<Uri?>(
+    initialValue = null,
+    key1 = item.id,
+    key2 = item.source,
+    key3 = screenId,
+  ) {
     value =
       withContext(Dispatchers.IO) {
-        resolvePlayableVideoUri(context, item)
+        resolvePlayableVideoUri(
+          context = context,
+          screenId = screenId,
+          item = item,
+          playbackCache = playbackCache,
+        )
       }
   }
 
@@ -728,6 +913,13 @@ private fun VideoRegionView(
       object : Player.Listener {
         override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
           playbackError = error.message ?: "falha no video"
+          playbackAnalytics.logEvent(
+            session = session,
+            screenId = screenId,
+            item = item,
+            eventType = "failed",
+            message = playbackError ?: "falha no video",
+          )
         }
 
         override fun onPlaybackStateChanged(playbackState: Int) {
@@ -767,12 +959,26 @@ private fun VideoRegionView(
   )
 }
 
-private fun resolvePlayableVideoUri(
+private suspend fun resolvePlayableVideoUri(
   context: Context,
+  screenId: String,
   item: TvRegionItem,
+  playbackCache: TvPlaybackCache,
 ): Uri? {
   val source = item.source ?: return null
-  if (!source.startsWith("data:")) return Uri.parse(source)
+
+  playbackCache.media().cachedFile(screenId, item.id)?.let { file ->
+    if (file.length() > 0L) return Uri.fromFile(file)
+  }
+
+  if (!source.startsWith("data:")) {
+    runCatching {
+      playbackCache.media().ensureCached(screenId, item.id, source)
+    }.getOrNull()?.let { file ->
+      if (file.length() > 0L) return Uri.fromFile(file)
+    }
+    return Uri.parse(source)
+  }
 
   val payload = parseDataUri(source) ?: return null
   val extension = mimeTypeToExtension(payload.mimeType, "mp4")
@@ -782,24 +988,45 @@ private fun resolvePlayableVideoUri(
   return Uri.fromFile(file)
 }
 
-private fun loadImageBitmap(source: String?): ImageLoadResult {
+private suspend fun loadImageBitmap(
+  screenId: String,
+  itemId: String,
+  source: String?,
+  playbackCache: TvPlaybackCache,
+): ImageLoadResult {
   if (source.isNullOrBlank()) {
     return ImageLoadResult(bitmap = null, error = "imagem sem source")
   }
 
   return try {
+    playbackCache.media().cachedFile(screenId, itemId)?.let { file ->
+      if (file.length() > 0L) {
+        val bitmap = BitmapFactory.decodeFile(file.absolutePath)
+        if (bitmap != null) {
+          return ImageLoadResult(bitmap = bitmap.asImageBitmap())
+        }
+      }
+    }
+
     val bytes =
       if (source.startsWith("data:")) {
         parseDataUri(source)?.bytes
       } else {
-        val connection = (URL(source).openConnection() as HttpURLConnection).apply {
-          connectTimeout = 30_000
-          readTimeout = 30_000
-          instanceFollowRedirects = true
-          setRequestProperty("User-Agent", "UpIndoorTV/1.0")
-        }
+        runCatching {
+          playbackCache.media().ensureCached(screenId, itemId, source)
+        }.getOrNull()?.let { cached ->
+          if (cached.length() > 0L) return@let cached.readBytes()
+          null
+        } ?: run {
+          val connection = (URL(source).openConnection() as HttpURLConnection).apply {
+            connectTimeout = 30_000
+            readTimeout = 30_000
+            instanceFollowRedirects = true
+            setRequestProperty("User-Agent", "UpIndoorTV/1.0")
+          }
 
-        connection.inputStream.use { input -> input.readBytes() }
+          connection.inputStream.use { input -> input.readBytes() }
+        }
       }
 
     val bitmap =

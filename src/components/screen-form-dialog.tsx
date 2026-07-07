@@ -23,6 +23,7 @@ import { Switch } from "@/components/ui/switch";
 import type {
   Company,
   CompanyScreen,
+  LayoutTemplate,
   Orientation,
   Screen,
   ScreenDisplayMode,
@@ -131,6 +132,7 @@ export function ScreenFormDialog({
   stores,
   companies,
   companyScreens,
+  layouts,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -139,6 +141,7 @@ export function ScreenFormDialog({
   stores: Store[];
   companies: Company[];
   companyScreens: CompanyScreen[];
+  layouts: LayoutTemplate[];
 }) {
   const [name, setName] = useState(initial?.name ?? "");
   const [location, setLocation] = useState(initial?.location ?? "");
@@ -159,6 +162,9 @@ export function ScreenFormDialog({
   const [resolutionHeight, setResolutionHeight] = useState(
     initial?.resolution_height ?? 1080,
   );
+  const [layoutTemplateId, setLayoutTemplateId] = useState<string | null>(
+    initial?.layout_template_id ?? null,
+  );
   const [selectedCompanyIds, setSelectedCompanyIds] = useState<string[]>([]);
 
   useEffect(() => {
@@ -172,6 +178,7 @@ export function ScreenFormDialog({
     setDisplayMode(initial?.display_mode ?? "normal");
     setResolutionWidth(initial?.resolution_width ?? 1920);
     setResolutionHeight(initial?.resolution_height ?? 1080);
+    setLayoutTemplateId(initial?.layout_template_id ?? null);
     setSelectedCompanyIds(
       initial
         ? companyScreens
@@ -181,8 +188,19 @@ export function ScreenFormDialog({
     );
   }, [open, initial, stores, companyScreens]);
 
+  useEffect(() => {
+    if (!layoutTemplateId) return;
+    const selected = layouts.find((layout) => layout.id === layoutTemplateId);
+    if (selected && selected.orientation !== orientation) {
+      setLayoutTemplateId(null);
+    }
+  }, [orientation, layoutTemplateId, layouts]);
+
   const canSubmit = Boolean(name.trim() && storeId);
   const activeCompanies = companies.filter((company) => company.active);
+  const compatibleLayouts = layouts.filter(
+    (layout) => layout.orientation === orientation,
+  );
 
   const toggleCompany = (companyId: string, checked: boolean) => {
     setSelectedCompanyIds((current) =>
@@ -298,6 +316,34 @@ export function ScreenFormDialog({
               <DisplayModeButtons value={displayMode} onChange={setDisplayMode} />
             </div>
 
+            <div>
+              <Label>Layout (opcional)</Label>
+              <Select
+                value={layoutTemplateId ?? "none"}
+                onValueChange={(value) =>
+                  setLayoutTemplateId(value === "none" ? null : value)
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Tela cheia (padrão)" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Tela cheia (padrão)</SelectItem>
+                  {compatibleLayouts.map((layout) => (
+                    <SelectItem key={layout.id} value={layout.id}>
+                      {layout.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {layouts.length > 0 && compatibleLayouts.length === 0 ? (
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Nenhum layout compatível com orientação{" "}
+                  {orientation === "portrait" ? "vertical" : "horizontal"}.
+                </p>
+              ) : null}
+            </div>
+
             <div className="flex items-center justify-between rounded-lg border border-border/60 p-3">
               <div>
                 <Label className="text-sm">Ativa</Label>
@@ -368,7 +414,7 @@ export function ScreenFormDialog({
                   display_mode: displayMode,
                   resolution_width: resolutionWidth,
                   resolution_height: resolutionHeight,
-                  layout_template_id: null,
+                  layout_template_id: layoutTemplateId,
                   store_id: storeId,
                   id: id || undefined,
                 },

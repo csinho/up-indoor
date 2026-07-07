@@ -19,6 +19,7 @@ import {
   Radio,
   LoaderCircle,
   LogOut,
+  BarChart3,
   Moon,
   QrCode,
   Sun,
@@ -80,6 +81,7 @@ import {
   updateLayoutTemplate,
   deleteLayoutTemplate,
   pairTvDevice,
+  getPlaybackAnalyticsSummary,
 } from "@/lib/data";
 import { QrPairingScanner } from "@/components/qr-pairing-scanner";
 import { CompaniesTab, PointsTab } from "@/components/org-management";
@@ -267,6 +269,15 @@ function Dashboard() {
               </Badge>
             </TabsTrigger>
             <TabsTrigger
+              value="layouts"
+              className="shrink-0 gap-2 rounded-lg px-4 data-[state=active]:gradient-brand data-[state=active]:text-brand-foreground data-[state=active]:shadow-glow"
+            >
+              <Sparkles className="h-4 w-4" /> Layouts
+              <Badge variant="secondary" className="ml-1">
+                {layouts.length}
+              </Badge>
+            </TabsTrigger>
+            <TabsTrigger
               value="companies"
               className="shrink-0 gap-2 rounded-lg px-4 data-[state=active]:gradient-brand data-[state=active]:text-brand-foreground data-[state=active]:shadow-glow"
             >
@@ -305,8 +316,19 @@ function Dashboard() {
               companies={companies}
               companyScreens={companyScreens}
               tvDevices={tvDevices}
+              layouts={layouts}
               qc={qc}
               loading={screensQ.isLoading}
+            />
+          </TabsContent>
+
+          <TabsContent value="layouts">
+            <LayoutsTab
+              layouts={layouts}
+              ads={supportedAds}
+              screens={screens}
+              qc={qc}
+              loading={layoutsQ.isLoading}
             />
           </TabsContent>
 
@@ -540,6 +562,12 @@ function Overview({
 }) {
   const adsPagination = usePaginatedItems(ads, 5, `ads-${ads.length}`);
   const screensPagination = usePaginatedItems(screens, 6, `screens-${screens.length}`);
+  const analyticsQ = useQuery({
+    queryKey: ["playbackAnalytics", ads.map((ad) => ad.id).join(",")],
+    queryFn: () => getPlaybackAnalyticsSummary(ads),
+    refetchInterval: 60_000,
+  });
+  const analytics = analyticsQ.data;
 
   return (
     <div className="grid gap-6 lg:grid-cols-3">
@@ -615,6 +643,93 @@ function Overview({
           <div className="flex items-center justify-between rounded-lg border border-border/60 px-3 py-2">
             <span className="text-muted-foreground">Sem app pareado</span>
             <span className="font-semibold">{tvStats.unpaired}</span>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card className="lg:col-span-3">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base">
+            <BarChart3 className="h-4 w-4" /> Telemetria (7 dias)
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="grid gap-4 md:grid-cols-3">
+          <div className="rounded-xl border border-border/60 bg-background/40 p-4">
+            <div className="text-xs uppercase tracking-wide text-muted-foreground">
+              Impressões
+            </div>
+            <div className="mt-2 text-3xl font-semibold">
+              {analyticsQ.isLoading ? "…" : (analytics?.impressions7d ?? 0)}
+            </div>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Exibições completas (&ge;3s)
+            </p>
+          </div>
+          <div className="rounded-xl border border-border/60 bg-background/40 p-4">
+            <div className="text-xs uppercase tracking-wide text-muted-foreground">
+              Reproduções iniciadas
+            </div>
+            <div className="mt-2 text-3xl font-semibold">
+              {analyticsQ.isLoading ? "…" : (analytics?.playbacksStarted7d ?? 0)}
+            </div>
+          </div>
+          <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-4">
+            <div className="text-xs uppercase tracking-wide text-muted-foreground">
+              Falhas de mídia
+            </div>
+            <div className="mt-2 text-3xl font-semibold text-destructive">
+              {analyticsQ.isLoading ? "…" : (analytics?.failures7d ?? 0)}
+            </div>
+          </div>
+
+          <div className="md:col-span-2">
+            <div className="mb-2 text-sm font-medium">Top campanhas</div>
+            {analyticsQ.isLoading ? (
+              <p className="text-sm text-muted-foreground">Carregando…</p>
+            ) : analytics?.topAds.length ? (
+              <ul className="space-y-2">
+                {analytics.topAds.map((entry) => (
+                  <li
+                    key={entry.adId}
+                    className="flex items-center justify-between rounded-lg border border-border/60 px-3 py-2 text-sm"
+                  >
+                    <span className="truncate">{entry.title}</span>
+                    <Badge variant="secondary">{entry.impressions}</Badge>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                Sem impressões registradas ainda. Os dados aparecem quando as TVs
+                ou o player web exibirem campanhas.
+              </p>
+            )}
+          </div>
+
+          <div>
+            <div className="mb-2 text-sm font-medium">Últimas falhas</div>
+            {analyticsQ.isLoading ? (
+              <p className="text-sm text-muted-foreground">Carregando…</p>
+            ) : analytics?.recentFailures.length ? (
+              <ul className="space-y-2 text-xs">
+                {analytics.recentFailures.map((failure) => (
+                  <li
+                    key={failure.id}
+                    className="rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2"
+                  >
+                    <div className="font-medium text-destructive">
+                      {failure.message || "Falha de reprodução"}
+                    </div>
+                    <div className="mt-1 text-muted-foreground">
+                      TV {failure.screen_id ?? "—"} ·{" "}
+                      {new Date(failure.created_at).toLocaleString("pt-BR")}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-sm text-muted-foreground">Nenhuma falha recente.</p>
+            )}
           </div>
         </CardContent>
       </Card>
@@ -834,6 +949,7 @@ function ScreensTab({
   companies,
   companyScreens,
   tvDevices,
+  layouts,
   qc,
   loading,
 }: {
@@ -842,6 +958,7 @@ function ScreensTab({
   companies: Company[];
   companyScreens: CompanyScreen[];
   tvDevices: TvDevice[];
+  layouts: LayoutTemplate[];
   qc: ReturnType<typeof useQueryClient>;
   loading: boolean;
 }) {
@@ -1049,6 +1166,7 @@ function ScreensTab({
         stores={stores}
         companies={companies}
         companyScreens={companyScreens}
+        layouts={layouts}
         onSubmit={async (values, companyIds) => {
           try {
             const created = await createScreen(values);
@@ -1071,6 +1189,7 @@ function ScreensTab({
         stores={stores}
         companies={companies}
         companyScreens={companyScreens}
+        layouts={layouts}
         initial={editing ?? undefined}
         onSubmit={async (values, companyIds) => {
           if (!editing) return;
@@ -1083,7 +1202,7 @@ function ScreensTab({
               display_mode: values.display_mode ?? "normal",
               resolution_width: values.resolution_width,
               resolution_height: values.resolution_height,
-              layout_template_id: null,
+              layout_template_id: values.layout_template_id ?? null,
               store_id: values.store_id ?? null,
             });
             await syncScreenCompanies(editing.id, companyIds);

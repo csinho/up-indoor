@@ -1,5 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 
+import { buildManifestRegions } from "../_shared/manifest.ts";
 import {
   corsHeaders,
   createAdminClient,
@@ -117,18 +118,6 @@ function sortAds(left: AdRow, right: AdRow) {
   const positionDiff = left.position - right.position;
   if (positionDiff !== 0) return positionDiff;
   return left.id.localeCompare(right.id);
-}
-
-function mapAdToManifestItem(ad: AdRow) {
-  return {
-    id: ad.id,
-    type: ad.type,
-    title: ad.title,
-    source: ad.source,
-    durationSeconds: ad.duration,
-    backgroundHex: "#111827",
-    textHex: "#FFFFFF",
-  };
 }
 
 Deno.serve(async (request: Request) => {
@@ -251,6 +240,49 @@ Deno.serve(async (request: Request) => {
       });
     }
 
+    let layoutRegions: LayoutRegionRow[] = [];
+    let layoutRegionItems: LayoutRegionItemRow[] = [];
+
+    if (typedScreen.layout_template_id) {
+      const { data: regionsData, error: regionsError } = await supabase
+        .from("layout_regions")
+        .select(
+          "id, layout_template_id, name, region_type, x, y, width, height, z_index, background",
+        )
+        .eq("layout_template_id", typedScreen.layout_template_id);
+
+      if (regionsError) {
+        throw regionsError;
+      }
+
+      layoutRegions = (regionsData ?? []) as LayoutRegionRow[];
+
+      if (layoutRegions.length > 0) {
+        const regionIds = layoutRegions.map((region) => region.id);
+        const { data: itemsData, error: itemsError } = await supabase
+          .from("layout_region_items")
+          .select(
+            "id, layout_region_id, item_type, ad_id, title, banner_text, background, text_color, position, active",
+          )
+          .in("layout_region_id", regionIds);
+
+        if (itemsError) {
+          throw itemsError;
+        }
+
+        layoutRegionItems = (itemsData ?? []) as LayoutRegionItemRow[];
+      }
+    }
+
+    const manifestRegions = buildManifestRegions({
+      layoutTemplateId: typedScreen.layout_template_id,
+      canvasWidth: typedScreen.resolution_width,
+      canvasHeight: typedScreen.resolution_height,
+      regions: layoutRegions,
+      regionItems: layoutRegionItems,
+      activeAds,
+    });
+
     const manifest = {
       screenId: typedScreen.id,
       screenName: typedScreen.name,
@@ -259,20 +291,7 @@ Deno.serve(async (request: Request) => {
       playlistVersion: typedScreen.playlist_version,
       canvasWidth: typedScreen.resolution_width,
       canvasHeight: typedScreen.resolution_height,
-      regions: [
-        {
-          id: "fallback-main",
-          name: "Principal",
-          type: "media",
-          x: 0,
-          y: 0,
-          width: typedScreen.resolution_width,
-          height: typedScreen.resolution_height,
-          zIndex: 1,
-          backgroundHex: "#000000",
-          items: activeAds.map(mapAdToManifestItem),
-        },
-      ],
+      regions: manifestRegions,
     };
 
     const now = new Date().toISOString();
