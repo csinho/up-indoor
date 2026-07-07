@@ -125,6 +125,14 @@ Deno.serve(async (request: Request) => {
 
     if (heartbeatError) throw heartbeatError;
 
+    const { error: healthSyncError } = await supabase.rpc(
+      "sync_tv_health_notifications_if_due",
+      { p_min_interval_seconds: 30 },
+    );
+    if (healthSyncError) {
+      console.error("tv-device-heartbeat health sync failed", healthSyncError);
+    }
+
     return jsonResponse({
       ok: true,
       deviceCode,

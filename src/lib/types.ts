@@ -216,6 +216,20 @@ export interface TvDeviceHeartbeat {
   created_at: string;
 }
 
+export type InAppNotificationType = "tv_problem" | "tv_recovered";
+
+export interface InAppNotification {
+  id: string;
+  owner_id: string;
+  type: InAppNotificationType;
+  screen_id: string | null;
+  device_id: string | null;
+  title: string;
+  body: string;
+  read_at: string | null;
+  created_at: string;
+}
+
 export interface TvPlaybackLog {
   id: string;
   device_id: string;

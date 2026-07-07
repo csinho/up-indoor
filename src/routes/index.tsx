@@ -28,6 +28,7 @@ import {
 } from "lucide-react";
 
 import { BrandLogo } from "@/components/brand-logo";
+import { TvNotificationsBell } from "@/components/tv-notifications-bell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -403,6 +404,7 @@ function TopBar() {
             )}
           </Button>
           <PwaInstallButton />
+          {user ? <TvNotificationsBell enabled={!!user} /> : null}
           {user ? (
             <>
               <div className="hidden rounded-lg border border-border/60 bg-card px-3 py-1.5 text-xs text-muted-foreground md:block">

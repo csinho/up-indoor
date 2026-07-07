@@ -15,6 +15,7 @@ import type {
   Store,
   StoreInput,
   TvDevice,
+  InAppNotification,
 } from "./types";
 import { isAdRunningNow, sortAdsForPlayback } from "./ad-utils";
 import { filterAdsForScreen } from "./ad-targeting";
@@ -442,6 +443,48 @@ export async function listTvDevices(): Promise<TvDevice[]> {
   }
 
   return [];
+}
+
+export async function listInAppNotifications(): Promise<InAppNotification[]> {
+  if (supabaseEnabled && supabase) {
+    const { data, error } = await supabase
+      .from("in_app_notifications")
+      .select("*")
+      .order("created_at", { ascending: false })
+      .limit(50);
+    if (error) throw error;
+    return (data ?? []) as InAppNotification[];
+  }
+
+  return [];
+}
+
+export async function markInAppNotificationRead(id: string): Promise<void> {
+  if (supabaseEnabled && supabase) {
+    const { error } = await supabase
+      .from("in_app_notifications")
+      .update({ read_at: new Date().toISOString() })
+      .eq("id", id)
+      .is("read_at", null);
+    if (error) throw error;
+  }
+}
+
+export async function markAllInAppNotificationsRead(): Promise<void> {
+  if (supabaseEnabled && supabase) {
+    const { error } = await supabase
+      .from("in_app_notifications")
+      .update({ read_at: new Date().toISOString() })
+      .is("read_at", null);
+    if (error) throw error;
+  }
+}
+
+export async function syncMyTvHealthNotifications(): Promise<void> {
+  if (supabaseEnabled && supabase) {
+    const { error } = await supabase.rpc("sync_my_tv_health_notifications");
+    if (error) throw error;
+  }
 }
 
 export async function deleteScreen(id: string): Promise<void> {

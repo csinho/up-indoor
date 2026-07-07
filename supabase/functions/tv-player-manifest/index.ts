@@ -321,6 +321,14 @@ Deno.serve(async (request: Request) => {
       },
     });
 
+    const { error: healthSyncError } = await supabase.rpc(
+      "sync_tv_health_notifications_if_due",
+      { p_min_interval_seconds: 30 },
+    );
+    if (healthSyncError) {
+      console.error("tv-player-manifest health sync failed", healthSyncError);
+    }
+
     return jsonResponse(manifest);
   } catch (error) {
     console.error("tv-player-manifest failed", error);

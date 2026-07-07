@@ -14,8 +14,10 @@ function formatUnknownError(error: unknown, fallback: string) {
   return fallback;
 }
 
+const FFMPEG_CORE_VERSION = "0.12.10";
+
 function getFfmpegAssetBaseUrl() {
-  return new URL("ffmpeg/", import.meta.env.BASE_URL).href;
+  return `https://cdn.jsdelivr.net/npm/@ffmpeg/core@${FFMPEG_CORE_VERSION}/dist/umd`;
 }
 
 async function getFfmpeg() {
