@@ -68,7 +68,7 @@ import {
   uploadAdMediaDataUri,
   uploadAdMediaFile,
 } from "@/lib/supabase";
-import { normalizeVideoForTv } from "@/lib/video-tv-normalize";
+import { normalizeVideoForTv, getVideoUploadErrorMessage } from "@/lib/video-tv-normalize";
 import type {
   Ad,
   AdInput,
@@ -615,7 +615,7 @@ function AdFormDialog({
                 };
                 await onSubmit(payload);
               } catch (error) {
-                toast.error((error as Error).message);
+                toast.error(getVideoUploadErrorMessage(error));
               } finally {
                 setSubmitting(false);
               }

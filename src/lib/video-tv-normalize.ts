@@ -4,16 +4,30 @@ import { fetchFile, toBlobURL } from "@ffmpeg/util";
 let ffmpegInstance: FFmpeg | null = null;
 let ffmpegLoading: Promise<FFmpeg> | null = null;
 
+function formatUnknownError(error: unknown, fallback: string) {
+  if (error instanceof Error && error.message.trim()) {
+    return error.message;
+  }
+  if (typeof error === "string" && error.trim()) {
+    return error;
+  }
+  return fallback;
+}
+
+function getFfmpegAssetBaseUrl() {
+  return new URL("ffmpeg/", import.meta.env.BASE_URL).href;
+}
+
 async function getFfmpeg() {
   if (ffmpegInstance) return ffmpegInstance;
   if (ffmpegLoading) return ffmpegLoading;
 
   ffmpegLoading = (async () => {
     const ffmpeg = new FFmpeg();
-    const baseURL = "https://cdn.jsdelivr.net/npm/@ffmpeg/core-st@0.12.10/dist/umd";
+    const baseURL = getFfmpegAssetBaseUrl();
     await ffmpeg.load({
-      coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, "text/javascript"),
-      wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, "application/wasm"),
+      coreURL: await toBlobURL(`${baseURL}ffmpeg-core.js`, "text/javascript"),
+      wasmURL: await toBlobURL(`${baseURL}ffmpeg-core.wasm`, "application/wasm"),
     });
     ffmpegInstance = ffmpeg;
     return ffmpeg;
@@ -62,19 +76,7 @@ function isProbablyTvSafe(
   return mp4Like && evenDimensions && standardSize && meta.width > 0;
 }
 
-export async function normalizeVideoForTv(
-  file: File,
-  onProgress?: (message: string) => void,
-): Promise<File> {
-  if (!file.type.startsWith("video/")) return file;
-
-  const meta = await readVideoMetadata(file);
-  if (isProbablyTvSafe(file, meta)) {
-    return file;
-  }
-
-  onProgress?.("Convertendo video para formato compativel com a TV…");
-
+async function transcodeWithFfmpeg(file: File) {
   const ffmpeg = await getFfmpeg();
   const inputName = "input.mp4";
   const outputName = "output.mp4";
@@ -130,8 +132,40 @@ export async function normalizeVideoForTv(
     bytes.byteOffset,
     bytes.byteOffset + bytes.byteLength,
   ) as ArrayBuffer;
+
   return new File([buffer], `${baseName}-tv.mp4`, {
     type: "video/mp4",
     lastModified: Date.now(),
   });
+}
+
+export async function normalizeVideoForTv(
+  file: File,
+  onProgress?: (message: string) => void,
+): Promise<File> {
+  if (!file.type.startsWith("video/")) return file;
+
+  const meta = await readVideoMetadata(file);
+  if (isProbablyTvSafe(file, meta)) {
+    return file;
+  }
+
+  onProgress?.("Convertendo video para formato compativel com a TV…");
+
+  try {
+    return await transcodeWithFfmpeg(file);
+  } catch (error) {
+    console.error("normalizeVideoForTv failed", error);
+    onProgress?.(
+      "Conversao indisponivel neste navegador. Enviando o video original.",
+    );
+    return file;
+  }
+}
+
+export function getVideoUploadErrorMessage(error: unknown) {
+  return formatUnknownError(
+    error,
+    "Falha ao enviar o anuncio. Verifique o arquivo e tente novamente.",
+  );
 }
