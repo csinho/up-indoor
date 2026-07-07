@@ -5,7 +5,7 @@ import android.graphics.BitmapFactory
 import android.graphics.Color.parseColor
 import android.net.Uri
 import android.util.Base64
-import android.view.TextureView
+import android.view.LayoutInflater
 import androidx.activity.ComponentActivity
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
@@ -76,6 +76,8 @@ import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.ui.AspectRatioFrameLayout
+import androidx.media3.ui.PlayerView
 import com.upindoor.tvplayer.R
 import com.upindoor.tvplayer.data.BackendConfig
 import com.upindoor.tvplayer.data.DeviceSessionStore
@@ -861,11 +863,13 @@ private fun VideoRegionView(
 ) {
   val context = LocalContext.current
   var playbackError by remember(item.id, item.source) { mutableStateOf<String?>(null) }
+  var cacheBypassAttempt by remember(item.id, item.source) { mutableIntStateOf(0) }
   val mediaUri by produceState<Uri?>(
     initialValue = null,
-    key1 = item.id,
-    key2 = item.source,
-    key3 = screenId,
+    item.id,
+    item.source,
+    screenId,
+    cacheBypassAttempt,
   ) {
     value =
       withContext(Dispatchers.IO) {
@@ -874,6 +878,7 @@ private fun VideoRegionView(
           screenId = screenId,
           item = item,
           playbackCache = playbackCache,
+          preferRemote = cacheBypassAttempt > 0,
         )
       }
   }
@@ -892,9 +897,11 @@ private fun VideoRegionView(
     return
   }
 
+  val resolvedUri = requireNotNull(mediaUri)
+
   val exoPlayer =
-    remember(item.id, mediaUri, shouldCropMedia) {
-      ExoPlayer.Builder(context).build().apply {
+    remember(item.id, resolvedUri, shouldCropMedia) {
+      TvExoPlayerFactory.create(context).apply {
         repeatMode = Player.REPEAT_MODE_ALL
         playWhenReady = true
         videoScalingMode =
@@ -903,15 +910,34 @@ private fun VideoRegionView(
           } else {
             C.VIDEO_SCALING_MODE_SCALE_TO_FIT
           }
-        setMediaItem(MediaItem.fromUri(requireNotNull(mediaUri)))
+        setMediaItem(MediaItem.fromUri(resolvedUri))
         prepare()
       }
+    }
+
+  val resizeMode =
+    if (shouldCropMedia) {
+      AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+    } else {
+      AspectRatioFrameLayout.RESIZE_MODE_FIT
     }
 
   DisposableEffect(exoPlayer) {
     val listener =
       object : Player.Listener {
         override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+          val remoteSource = item.source
+          if (
+            cacheBypassAttempt == 0 &&
+            !remoteSource.isNullOrBlank() &&
+            !remoteSource.startsWith("data:")
+          ) {
+            playbackCache.media().invalidate(screenId, item.id)
+            cacheBypassAttempt += 1
+            playbackError = null
+            return
+          }
+
           playbackError = error.message ?: "falha no video"
           playbackAnalytics.logEvent(
             session = session,
@@ -939,22 +965,16 @@ private fun VideoRegionView(
 
   AndroidView(
     factory = { viewContext ->
-      TextureView(viewContext).apply {
-        isOpaque = true
-      }
+      LayoutInflater.from(viewContext)
+        .inflate(R.layout.tv_player_view, null, false) as PlayerView
     },
     modifier = Modifier.fillMaxSize(),
-    update = { textureView ->
-      exoPlayer.videoScalingMode =
-        if (shouldCropMedia) {
-          C.VIDEO_SCALING_MODE_SCALE_TO_FIT_WITH_CROPPING
-        } else {
-          C.VIDEO_SCALING_MODE_SCALE_TO_FIT
-        }
-      exoPlayer.setVideoTextureView(textureView)
+    update = { playerView ->
+      playerView.resizeMode = resizeMode
+      playerView.player = exoPlayer
     },
-    onRelease = { textureView ->
-      exoPlayer.clearVideoTextureView(textureView)
+    onRelease = { playerView ->
+      playerView.player = null
     },
   )
 }
@@ -964,11 +984,14 @@ private suspend fun resolvePlayableVideoUri(
   screenId: String,
   item: TvRegionItem,
   playbackCache: TvPlaybackCache,
+  preferRemote: Boolean = false,
 ): Uri? {
   val source = item.source ?: return null
 
-  playbackCache.media().cachedFile(screenId, item.id)?.let { file ->
-    if (file.length() > 0L) return Uri.fromFile(file)
+  if (!preferRemote) {
+    playbackCache.media().cachedFile(screenId, item.id)?.let { file ->
+      if (file.length() > 0L) return Uri.fromFile(file)
+    }
   }
 
   if (!source.startsWith("data:")) {

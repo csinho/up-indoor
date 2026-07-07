@@ -22,8 +22,26 @@ class MediaCacheManager(context: Context) {
   fun cachedFile(screenId: String, itemId: String): File? {
     val dir = screenMediaDir(screenId)
     val prefix = safeItemId(itemId)
-    return dir.listFiles()?.firstOrNull { file ->
-      file.isFile && file.name.startsWith("$prefix.")
+    val candidate =
+      dir.listFiles()?.firstOrNull { file ->
+        file.isFile && file.name.startsWith("$prefix.")
+      } ?: return null
+
+    if (!isValidCachedMedia(candidate)) {
+      candidate.delete()
+      return null
+    }
+
+    return candidate
+  }
+
+  fun invalidate(screenId: String, itemId: String) {
+    val dir = screenMediaDir(screenId)
+    val prefix = safeItemId(itemId)
+    dir.listFiles()?.forEach { file ->
+      if (file.isFile && file.name.startsWith("$prefix.")) {
+        file.delete()
+      }
     }
   }
 
@@ -54,10 +72,10 @@ class MediaCacheManager(context: Context) {
   suspend fun ensureCached(screenId: String, itemId: String, url: String): File? {
     if (url.startsWith("data:")) return null
 
-    cachedFile(screenId, itemId)?.takeIf { it.length() > 0L }?.let { return it }
+    cachedFile(screenId, itemId)?.let { return it }
 
     return withContext(Dispatchers.IO) {
-      downloadToCache(screenId, itemId, url)
+      downloadToCache(screenId, itemId, url)?.takeIf { file -> isValidCachedMedia(file) }
     }
   }
 
@@ -110,6 +128,10 @@ class MediaCacheManager(context: Context) {
           temp.copyTo(file, overwrite = true)
           temp.delete()
         }
+        if (!isValidCachedMedia(file)) {
+          file.delete()
+          return null
+        }
         file
       }
     } finally {
@@ -136,6 +158,19 @@ class MediaCacheManager(context: Context) {
   private fun safeItemId(itemId: String): String {
     val digest = MessageDigest.getInstance("SHA-256").digest(itemId.toByteArray())
     return digest.take(8).joinToString("") { byte -> "%02x".format(byte) }
+  }
+
+  private fun isValidCachedMedia(file: File): Boolean {
+    if (!file.isFile || file.length() < 12L) return false
+
+    return runCatching {
+      file.inputStream().use { input ->
+        val header = ByteArray(12)
+        if (input.read(header) < 12) return false
+        val signature = String(header, 4, 4, Charsets.US_ASCII)
+        signature == "ftyp" || signature == "moov" || signature == "mdat"
+      }
+    }.getOrDefault(false)
   }
 
   companion object {

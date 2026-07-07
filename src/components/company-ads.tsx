@@ -68,6 +68,7 @@ import {
   uploadAdMediaDataUri,
   uploadAdMediaFile,
 } from "@/lib/supabase";
+import { normalizeVideoForTv } from "@/lib/video-tv-normalize";
 import type {
   Ad,
   AdInput,
@@ -538,6 +539,8 @@ function AdFormDialog({
 
         <p className="text-xs text-muted-foreground">
           Este anúncio passa nas TVs onde a empresa está vinculada (aba TVs).
+          Vídeos do celular ou WhatsApp são convertidos automaticamente para o
+          formato compatível com Fire Stick e Android TV.
         </p>
 
         <div className="mt-4 flex items-center justify-between rounded-lg border border-border/60 p-3">
@@ -564,7 +567,13 @@ function AdFormDialog({
 
                 if (supabaseEnabled) {
                   if (uploadFile) {
-                    finalSource = await uploadAdMediaFile(uploadFile);
+                    const preparedFile =
+                      type === "video"
+                        ? await normalizeVideoForTv(uploadFile, (message) =>
+                            toast.message(message),
+                          )
+                        : uploadFile;
+                    finalSource = await uploadAdMediaFile(preparedFile);
                   } else if (
                     pendingInlineUpload &&
                     isInlineMediaSource(pendingInlineUpload)
