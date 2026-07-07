@@ -79,6 +79,8 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import com.upindoor.tvplayer.R
+import com.upindoor.tvplayer.BuildConfig
+import com.upindoor.tvplayer.data.TvRuntimeState
 import com.upindoor.tvplayer.data.BackendConfig
 import com.upindoor.tvplayer.data.DeviceSessionStore
 import com.upindoor.tvplayer.data.TvBackendException
@@ -494,6 +496,82 @@ private fun PlayerScreen(
 }
 
 @Composable
+private fun TvDeviceInfoPanel(
+  session: TvDeviceSession,
+  manifest: TvScreenManifest,
+) {
+  var expanded by remember { mutableStateOf(false) }
+  val locationLabel =
+    remember(manifest.screenLocation, manifest.storeName) {
+      when {
+        manifest.storeName.isNotBlank() && manifest.screenLocation.isNotBlank() ->
+          "${manifest.storeName} · ${manifest.screenLocation}"
+        manifest.storeName.isNotBlank() -> manifest.storeName
+        manifest.screenLocation.isNotBlank() -> manifest.screenLocation
+        else -> "Local não informado"
+      }
+    }
+
+  Box(
+    modifier =
+      Modifier
+        .fillMaxSize()
+        .padding(20.dp),
+    contentAlignment = Alignment.BottomStart,
+  ) {
+    Column(
+      modifier =
+        Modifier
+          .widthIn(max = 520.dp)
+          .background(Color(0xCC111827), RoundedCornerShape(10.dp))
+          .padding(horizontal = 14.dp, vertical = 10.dp),
+    ) {
+      Text(
+        text = if (expanded) "Informações da TV" else "${manifest.screenName} · ${manifest.screenId}",
+        color = Color.White,
+        fontSize = 14.sp,
+        fontWeight = FontWeight.SemiBold,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+      )
+
+      if (expanded) {
+        Spacer(modifier = Modifier.height(8.dp))
+        Text("Screen ID: ${manifest.screenId}", color = Color(0xFFCBD5E1), fontSize = 13.sp)
+        Text("Nome: ${manifest.screenName}", color = Color(0xFFCBD5E1), fontSize = 13.sp)
+        Text("Local: $locationLabel", color = Color(0xFFCBD5E1), fontSize = 13.sp)
+        Text(
+          text = "Device: ${manifest.deviceCode.ifBlank { session.deviceCode }}",
+          color = Color(0xFFCBD5E1),
+          fontSize = 13.sp,
+        )
+        Text(
+          text =
+            "TV ${if (TvRuntimeState.isDisplayOn()) "ligada" else "desligada"} · App ${
+              if (TvRuntimeState.isAppForeground()) "aberto" else "fechado"
+            }",
+          color = Color(0xFF93C5FD),
+          fontSize = 13.sp,
+        )
+        Text("App v${BuildConfig.VERSION_NAME}", color = Color(0xFF94A3B8), fontSize = 12.sp)
+      }
+
+      Spacer(modifier = Modifier.height(6.dp))
+      Button(
+        onClick = { expanded = !expanded },
+        colors =
+          ButtonDefaults.buttonColors(
+            containerColor = Color(0xFF1F2937),
+            contentColor = Color.White,
+          ),
+      ) {
+        Text(if (expanded) "Ocultar detalhes" else "Ver detalhes da TV")
+      }
+    }
+  }
+}
+
+@Composable
 private fun OfflineBadge(lastSyncedAt: Long?) {
   val label =
     remember(lastSyncedAt) {
@@ -558,6 +636,10 @@ private fun TvViewport(
       if (isOffline) {
         OfflineBadge(lastSyncedAt = lastSyncedAt)
       }
+      TvDeviceInfoPanel(
+        session = session,
+        manifest = manifest,
+      )
     }
   }
 

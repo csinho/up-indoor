@@ -2,6 +2,7 @@ package com.upindoor.tvplayer.data
 
 import android.os.Build
 import com.upindoor.tvplayer.BuildConfig
+import com.upindoor.tvplayer.data.TvRuntimeState
 import com.upindoor.tvplayer.model.TvDeviceSession
 import com.upindoor.tvplayer.model.TvDisplayMode
 import com.upindoor.tvplayer.model.TvLayoutRegion
@@ -121,6 +122,16 @@ class TvManifestRepository {
         payload.put("meta", meta)
       }
 
+      payload
+        .put(
+          "appState",
+          meta?.optString("appState")?.ifBlank { null } ?: TvRuntimeState.appStateValue(),
+        )
+        .put(
+          "displayPower",
+          meta?.optString("displayPower")?.ifBlank { null } ?: TvRuntimeState.displayPowerValue(),
+        )
+
       postJson("$baseUrl/functions/v1/tv-device-heartbeat", payload)
     }
   }
@@ -165,7 +176,11 @@ class TvManifestRepository {
   }
 
   private fun fetchManifestJson(baseUrl: String, deviceCode: String): JSONObject {
-    val payload = JSONObject().put("deviceCode", deviceCode)
+    val payload =
+      JSONObject()
+        .put("deviceCode", deviceCode)
+        .put("appState", com.upindoor.tvplayer.data.TvRuntimeState.appStateValue())
+        .put("displayPower", com.upindoor.tvplayer.data.TvRuntimeState.displayPowerValue())
     return postJson("$baseUrl/functions/v1/tv-player-manifest", payload)
   }
 
@@ -215,6 +230,9 @@ class TvManifestRepository {
     return TvScreenManifest(
       screenId = json.getString("screenId"),
       screenName = json.optString("screenName", json.getString("screenId")),
+      screenLocation = json.optString("screenLocation", ""),
+      storeName = json.optString("storeName", ""),
+      deviceCode = json.optString("deviceCode", ""),
       orientation =
         if (json.optString("orientation") == "portrait") {
           TvOrientation.PORTRAIT

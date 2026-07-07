@@ -96,9 +96,12 @@ import {
 import {
   getConnectionDotClass,
   getPrimaryTvDevice,
+  getTvAppState,
   getTvConnectionState,
+  getTvPowerState,
   summarizeTvStatuses,
 } from "@/lib/tv-status";
+import { useTvRealtime } from "@/hooks/use-tv-realtime";
 import { MobileBottomNav, type DashboardTab } from "@/components/mobile-bottom-nav";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { PwaInstallButton } from "@/components/pwa-install-prompt";
@@ -171,7 +174,6 @@ function Dashboard() {
     queryKey: ["tvDevices"],
     queryFn: listTvDevices,
     enabled: !!user,
-    refetchInterval: 15_000,
   });
   const categoriesQ = useQuery({
     queryKey: ["categories"],
@@ -203,6 +205,8 @@ function Dashboard() {
       router.navigate({ to: "/login", replace: true });
     }
   }, [loading, router, user]);
+
+  useTvRealtime(!!user);
 
   if (loading) {
     return <FullScreenLoader text="Verificando sua sessão..." />;
@@ -752,9 +756,10 @@ function Overview({
           ) : (
             <>
               {screensPagination.paginatedItems.map((screen) => {
-                const connection = getTvConnectionState(
-                  getPrimaryTvDevice(screen.id, tvDevices),
-                );
+                const device = getPrimaryTvDevice(screen.id, tvDevices);
+                const connection = getTvConnectionState(device);
+                const power = getTvPowerState(device);
+                const app = getTvAppState(device);
                 return (
                   <div
                     key={screen.id}
@@ -772,7 +777,10 @@ function Overview({
                       </div>
                     </div>
                     <div className="flex shrink-0 flex-col items-end gap-1">
-                      <Badge className={connection.className}>{connection.label}</Badge>
+                      <div className="flex flex-wrap justify-end gap-1">
+                        <Badge className={power.className}>TV: {power.label}</Badge>
+                        <Badge className={app.className}>App: {app.label}</Badge>
+                      </div>
                       <span className="text-[10px] text-muted-foreground">
                         {screen.active ? "Habilitada" : "Desabilitada"}
                       </span>
@@ -1277,6 +1285,8 @@ function ScreenCard({
       ? `${window.location.origin}/player/${screen.id}`
       : `/player/${screen.id}`;
   const connectionState = getTvConnectionState(tvDevice);
+  const powerState = getTvPowerState(tvDevice);
+  const appState = getTvAppState(tvDevice);
 
   return (
     <div className="group relative overflow-hidden rounded-2xl border border-border bg-card p-5 shadow-card transition hover:border-[color:var(--brand)]/40">
@@ -1308,10 +1318,12 @@ function ScreenCard({
             <Badge variant="outline">
               {getDisplayModeLabel(screen.display_mode ?? "normal")}
             </Badge>
-            <Badge className={connectionState.className}>{connectionState.label}</Badge>
+            <Badge className={powerState.className}>TV: {powerState.label}</Badge>
+            <Badge className={appState.className}>App: {appState.label}</Badge>
           </div>
           <p className="mt-2 text-xs text-muted-foreground">
             {connectionState.detail}
+            {tvDevice?.device_code ? ` · Código ${tvDevice.device_code}` : ""}
             {tvDevice?.device_name ? ` · ${tvDevice.device_name}` : ""}
           </p>
           <div className="mt-4 space-y-3">

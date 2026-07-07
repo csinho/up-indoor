@@ -6,7 +6,6 @@ import {
   listInAppNotifications,
   markAllInAppNotificationsRead,
   markInAppNotificationRead,
-  syncMyTvHealthNotifications,
 } from "@/lib/data";
 import type { InAppNotification } from "@/lib/types";
 
@@ -36,24 +35,7 @@ export function useTvNotifications(enabled: boolean) {
     queryKey: NOTIFICATIONS_QUERY_KEY,
     queryFn: listInAppNotifications,
     enabled,
-    refetchInterval: 15_000,
   });
-
-  useEffect(() => {
-    if (!enabled) return;
-
-    const sync = () => {
-      void syncMyTvHealthNotifications()
-        .then(() => qc.invalidateQueries({ queryKey: NOTIFICATIONS_QUERY_KEY }))
-        .catch((error) => {
-          console.error("syncMyTvHealthNotifications failed", error);
-        });
-    };
-
-    sync();
-    const timer = window.setInterval(sync, 30_000);
-    return () => window.clearInterval(timer);
-  }, [enabled, qc]);
 
   useEffect(() => {
     const notifications = notificationsQ.data;

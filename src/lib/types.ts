@@ -192,6 +192,8 @@ export interface TvDevice {
   pairing_code_expires_at: string | null;
   screen_id: string | null;
   status: "pending" | "paired" | "online" | "idle" | "offline" | "error";
+  app_state?: "foreground" | "background" | "unknown";
+  display_power?: "on" | "off" | "unknown";
   app_version: string;
   os_version: string;
   last_seen_at: string | null;

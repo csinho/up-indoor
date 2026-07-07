@@ -43,8 +43,10 @@ type AdRow = {
 };
 
 type ScreenWithStoreRow = ScreenRow & {
+  location: string | null;
   store_id: string | null;
   stores?: {
+    name: string | null;
     category_id: string | null;
   } | null;
 };
@@ -177,7 +179,7 @@ Deno.serve(async (request: Request) => {
     const { data: screen, error: screenError } = await supabase
       .from("screens")
       .select(
-        "id, name, orientation, display_mode, resolution_width, resolution_height, layout_template_id, playlist_version, active, store_id, stores(category_id)",
+        "id, name, location, orientation, display_mode, resolution_width, resolution_height, layout_template_id, playlist_version, active, store_id, stores(name, category_id)",
       )
       .eq("id", device.screen_id)
       .single();
@@ -286,6 +288,9 @@ Deno.serve(async (request: Request) => {
     const manifest = {
       screenId: typedScreen.id,
       screenName: typedScreen.name,
+      screenLocation: typedScreen.location ?? "",
+      storeName: typedScreen.stores?.name ?? "",
+      deviceCode: device.device_code,
       orientation: typedScreen.orientation,
       displayMode: typedScreen.display_mode ?? "normal",
       playlistVersion: typedScreen.playlist_version,
@@ -295,12 +300,34 @@ Deno.serve(async (request: Request) => {
     };
 
     const now = new Date().toISOString();
+    const manifestMeta =
+      body.meta && typeof body.meta === "object" && !Array.isArray(body.meta)
+        ? body.meta
+        : {};
+    const appStateRaw = String(body.appState ?? manifestMeta.appState ?? "foreground").trim();
+    const displayPowerRaw = String(body.displayPower ?? manifestMeta.displayPower ?? "unknown")
+      .trim();
+    const appState =
+      appStateRaw === "foreground" || appStateRaw === "background"
+        ? appStateRaw
+        : "foreground";
+    const displayPower =
+      displayPowerRaw === "on" || displayPowerRaw === "off" ? displayPowerRaw : "unknown";
+
     await supabase
       .from("tv_devices")
       .update({
         status: "online",
+        app_state: appState,
+        display_power: displayPower,
         last_seen_at: now,
         last_playlist_version: typedScreen.playlist_version,
+        meta: {
+          ...manifestMeta,
+          appState,
+          displayPower,
+          source: "tv-player-manifest",
+        },
       })
       .eq("id", device.id);
 
@@ -321,10 +348,9 @@ Deno.serve(async (request: Request) => {
       },
     });
 
-    const { error: healthSyncError } = await supabase.rpc(
-      "sync_tv_health_notifications_if_due",
-      { p_min_interval_seconds: 30 },
-    );
+    const { error: healthSyncError } = await supabase.rpc("process_tv_screen_health", {
+      p_screen_id: typedScreen.id,
+    });
     if (healthSyncError) {
       console.error("tv-player-manifest health sync failed", healthSyncError);
     }

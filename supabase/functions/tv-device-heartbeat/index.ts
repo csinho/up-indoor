@@ -48,6 +48,22 @@ Deno.serve(async (request: Request) => {
         ? body.meta
         : {};
 
+    const appStateRaw = String(body.appState ?? meta.appState ?? "unknown").trim();
+    const displayPowerRaw = String(body.displayPower ?? meta.displayPower ?? "unknown")
+      .trim();
+
+    const appState =
+      appStateRaw === "foreground" || appStateRaw === "background"
+        ? appStateRaw
+        : status === "idle"
+          ? "background"
+          : status === "online" || status === "playing" || status === "syncing"
+            ? "foreground"
+            : "unknown";
+
+    const displayPower =
+      displayPowerRaw === "on" || displayPowerRaw === "off" ? displayPowerRaw : "unknown";
+
     if (!deviceCode) {
       return jsonResponse(
         { error: "invalid_device_code", message: "deviceCode is required." },
@@ -99,10 +115,14 @@ Deno.serve(async (request: Request) => {
       .update({
         screen_id: effectiveScreenId,
         status: deviceStatus,
+        app_state: appState,
+        display_power: displayPower,
         last_seen_at: now,
         last_playlist_version: playlistVersion,
         meta: {
           ...(typeof meta === "object" ? meta : {}),
+          appState,
+          displayPower,
           source: "tv-device-heartbeat",
         },
       })
@@ -125,12 +145,14 @@ Deno.serve(async (request: Request) => {
 
     if (heartbeatError) throw heartbeatError;
 
-    const { error: healthSyncError } = await supabase.rpc(
-      "sync_tv_health_notifications_if_due",
-      { p_min_interval_seconds: 30 },
-    );
-    if (healthSyncError) {
-      console.error("tv-device-heartbeat health sync failed", healthSyncError);
+    if (effectiveScreenId) {
+      const { error: healthSyncError } = await supabase.rpc(
+        "process_tv_screen_health",
+        { p_screen_id: effectiveScreenId },
+      );
+      if (healthSyncError) {
+        console.error("tv-device-heartbeat health sync failed", healthSyncError);
+      }
     }
 
     return jsonResponse({

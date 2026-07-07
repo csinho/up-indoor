@@ -32,6 +32,9 @@ data class TvDeviceSession(
 data class TvScreenManifest(
   val screenId: String,
   val screenName: String,
+  val screenLocation: String = "",
+  val storeName: String = "",
+  val deviceCode: String = "",
   val orientation: TvOrientation,
   val displayMode: TvDisplayMode,
   val playlistVersion: Long,
